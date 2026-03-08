@@ -6,3 +6,66 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum MemberRole {
+  OWNER
+  EDITOR
+  COMMENTER
+  VIEWER
+}
+
+model User {
+  id             String             @id @default(cuid())
+  email          String             @unique
+  name           String?
+  imageUrl       String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  documents      Document[]
+  memberships    DocumentMember[]
+  createdSnaps   DocumentSnapshot[]
+}
+
+model Document {
+  id         String             @id @default(cuid())
+  title      String             @default("Untitled document")
+  content    Json
+  ownerId    String
+  isArchived Boolean            @default(false)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  owner      User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  members    DocumentMember[]
+  snapshots  DocumentSnapshot[]
+
+  @@index([ownerId])
+  @@index([updatedAt])
+}
+
+model DocumentMember {
+  id         String     @id @default(cuid())
+  documentId String
+  userId     String
+  role       MemberRole @default(EDITOR)
+  createdAt  DateTime   @default(now())
+  document   Document   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, userId])
+  @@index([userId])
+}
+
+model DocumentSnapshot {
+  id          String    @id @default(cuid())
+  documentId  String
+  createdById String?
+  version     Int
+  content     Json
+  createdAt   DateTime  @default(now())
+  document    Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdBy   User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([documentId, version])
+  @@index([documentId, createdAt])
+  @@index([createdById])
+}
