@@ -1,0 +1,24 @@
+{
+  "name": "collab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc --noEmit",
+    "start": "tsx src/index.ts",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hocuspocus/server": "^3.4.0",
+    "@hocuspocus/transformer": "^3.4.0",
+    "@repo/db": "*",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "*",
+    "@types/node": "^22.15.3",
+    "tsx": "^4.20.6",
+    "typescript": "5.9.2"
+  }
+}

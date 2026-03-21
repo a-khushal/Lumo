@@ -1,7 +1,13 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
-  "globalEnv": ["DATABASE_URL", "DEMO_USER_EMAIL", "DEMO_USER_NAME"],
+  "globalEnv": [
+    "DATABASE_URL",
+    "DEMO_USER_EMAIL",
+    "DEMO_USER_NAME",
+    "NEXT_PUBLIC_COLLAB_URL",
+    "COLLAB_PORT"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

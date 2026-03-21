@@ -1,13 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { HocuspocusProvider } from "@hocuspocus/provider";
+import Collaboration from "@tiptap/extension-collaboration";
 import StarterKit from "@tiptap/starter-kit";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as Y from "yjs";
 
 type DocumentEditorProps = {
   documentId: string;
   currentUserId: string;
+  currentUserEmail: string;
+  currentUserName: string | null;
   currentUserRole: DocumentRole;
   initialTitle: string;
   initialContent: unknown;
@@ -76,6 +81,7 @@ type ApiError = {
 
 type InviteStatus = "idle" | "submitting" | "error" | "success";
 type EditorDoc = Record<string, unknown>;
+type CollabStatus = "connecting" | "connected" | "disconnected";
 
 const emptyDoc: EditorDoc = {
   type: "doc",
@@ -144,9 +150,35 @@ const normalizeEditorContent = (value: unknown): EditorDoc => {
   return emptyDoc;
 };
 
+const collabUrl =
+  process.env.NEXT_PUBLIC_COLLAB_URL?.trim() || "ws://127.0.0.1:1234";
+
+const getUserColor = (id: string) => {
+  const palette = [
+    "#136f63",
+    "#0ea5e9",
+    "#f59e0b",
+    "#ef4444",
+    "#8b5cf6",
+    "#059669",
+    "#db2777",
+  ];
+
+  let hash = 0;
+
+  for (let index = 0; index < id.length; index += 1) {
+    hash = (hash << 5) - hash + id.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return palette[Math.abs(hash) % palette.length] ?? palette[0];
+};
+
 export function DocumentEditor({
   documentId,
   currentUserId,
+  currentUserEmail,
+  currentUserName,
   currentUserRole,
   initialTitle,
   initialContent,
@@ -179,6 +211,8 @@ export function DocumentEditor({
     type: "updating-role" | "removing";
   } | null>(null);
   const [snapshotActionId, setSnapshotActionId] = useState<string | null>(null);
+  const [collabStatus, setCollabStatus] = useState<CollabStatus>("connecting");
+  const [activeCollaborators, setActiveCollaborators] = useState(1);
   const lastPayloadRef = useRef(
     JSON.stringify({ title: initialTitle, content: startingContent }),
   );
@@ -186,30 +220,90 @@ export function DocumentEditor({
   const canManageMembers = owner?.user.id === currentUserId;
   const canEdit = currentUserRole === "OWNER" || currentUserRole === "EDITOR";
 
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: {
-          levels: [1, 2],
+  const collaborationState = useMemo(() => {
+    const document = new Y.Doc();
+    const provider = new HocuspocusProvider({
+      url: collabUrl,
+      name: documentId,
+      document,
+      token: currentUserId,
+    });
+
+    return { document, provider };
+  }, [documentId, currentUserId]);
+
+  useEffect(() => {
+    if (collaborationState.provider.awareness) {
+      collaborationState.provider.setAwarenessField("user", {
+        id: currentUserId,
+        name: currentUserName || currentUserEmail,
+        color: getUserColor(currentUserId),
+      });
+    }
+
+    const handleStatus = ({
+      status,
+    }: {
+      status: "connected" | "connecting" | "disconnected";
+    }) => {
+      setCollabStatus(status);
+    };
+
+    const handleAwarenessChange = () => {
+      if (!collaborationState.provider.awareness) {
+        setActiveCollaborators(1);
+        return;
+      }
+
+      const states = collaborationState.provider.awareness.getStates();
+      setActiveCollaborators(Math.max(states.size, 1));
+    };
+
+    collaborationState.provider.on("status", handleStatus);
+    collaborationState.provider.awareness?.on("change", handleAwarenessChange);
+    handleAwarenessChange();
+
+    return () => {
+      collaborationState.provider.awareness?.off(
+        "change",
+        handleAwarenessChange,
+      );
+      collaborationState.provider.off("status", handleStatus);
+      collaborationState.provider.destroy();
+      collaborationState.document.destroy();
+    };
+  }, [collaborationState, currentUserEmail, currentUserId, currentUserName]);
+
+  const editor = useEditor(
+    {
+      extensions: [
+        StarterKit.configure({
+          heading: {
+            levels: [1, 2],
+          },
+        }),
+        Collaboration.configure({
+          document: collaborationState.document,
+        }),
+      ],
+      editable: canEdit,
+      content: startingContent,
+      editorProps: {
+        attributes: {
+          class:
+            "min-h-[66vh] w-full border-0 bg-transparent p-4 text-base leading-relaxed text-ink outline-none [&_h1]:mb-3 [&_h1]:text-3xl [&_h1]:font-semibold [&_h2]:mb-3 [&_h2]:text-2xl [&_h2]:font-semibold [&_p]:mb-3 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6",
         },
-      }),
-    ],
-    editable: canEdit,
-    content: startingContent,
-    editorProps: {
-      attributes: {
-        class:
-          "min-h-[66vh] w-full border-0 bg-transparent p-4 text-base leading-relaxed text-ink outline-none [&_h1]:mb-3 [&_h1]:text-3xl [&_h1]:font-semibold [&_h2]:mb-3 [&_h2]:text-2xl [&_h2]:font-semibold [&_p]:mb-3 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6",
+      },
+      onUpdate({
+        editor: currentEditor,
+      }: {
+        editor: { getJSON: () => unknown };
+      }) {
+        setContent(currentEditor.getJSON() as EditorDoc);
       },
     },
-    onUpdate({
-      editor: currentEditor,
-    }: {
-      editor: { getJSON: () => unknown };
-    }) {
-      setContent(currentEditor.getJSON() as EditorDoc);
-    },
-  });
+    [collaborationState],
+  );
 
   useEffect(() => {
     editor?.setEditable(canEdit);
@@ -521,7 +615,7 @@ export function DocumentEditor({
       lastPayloadRef.current = nextPayload;
       setTitle(nextTitle);
       setContent(nextContent);
-      editor?.commands.setContent(nextContent, false);
+      editor?.commands.setContent(nextContent);
       setSaveState("saved");
       setLastSavedAt(data.document.updatedAt);
 
@@ -578,7 +672,9 @@ export function DocumentEditor({
               {isShareOpen ? "Close" : "Share"}
             </button>
           </div>
-          <p className="text-sm text-muted">{statusLabel}</p>
+          <p className="text-sm text-muted">
+            {statusLabel} · {collabStatus} · {activeCollaborators} online
+          </p>
         </div>
       </header>
 
@@ -823,7 +919,11 @@ export function DocumentEditor({
             type="button"
             disabled={!canEdit}
             onClick={() =>
-              editor?.chain().focus().toggleHeading({ level: 1 }).run()
+              editor
+                ?.chain()
+                .focus()
+                .toggleNode("heading", "paragraph", { level: 1 })
+                .run()
             }
           >
             H1
@@ -837,7 +937,11 @@ export function DocumentEditor({
             type="button"
             disabled={!canEdit}
             onClick={() =>
-              editor?.chain().focus().toggleHeading({ level: 2 }).run()
+              editor
+                ?.chain()
+                .focus()
+                .toggleNode("heading", "paragraph", { level: 2 })
+                .run()
             }
           >
             H2
@@ -850,7 +954,7 @@ export function DocumentEditor({
             }`}
             type="button"
             disabled={!canEdit}
-            onClick={() => editor?.chain().focus().toggleBold().run()}
+            onClick={() => editor?.chain().focus().toggleMark("bold").run()}
           >
             Bold
           </button>
@@ -862,7 +966,7 @@ export function DocumentEditor({
             }`}
             type="button"
             disabled={!canEdit}
-            onClick={() => editor?.chain().focus().toggleItalic().run()}
+            onClick={() => editor?.chain().focus().toggleMark("italic").run()}
           >
             Italic
           </button>
@@ -874,7 +978,9 @@ export function DocumentEditor({
             }`}
             type="button"
             disabled={!canEdit}
-            onClick={() => editor?.chain().focus().toggleBulletList().run()}
+            onClick={() =>
+              editor?.chain().focus().toggleList("bulletList", "listItem").run()
+            }
           >
             Bullet list
           </button>
@@ -886,7 +992,13 @@ export function DocumentEditor({
             }`}
             type="button"
             disabled={!canEdit}
-            onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+            onClick={() =>
+              editor
+                ?.chain()
+                .focus()
+                .toggleList("orderedList", "listItem")
+                .run()
+            }
           >
             Numbered list
           </button>

@@ -49,6 +49,8 @@ export default async function DocumentPage({ params }: DocumentPageProps) {
     <DocumentEditor
       documentId={document.id}
       currentUserId={user.id}
+      currentUserEmail={user.email}
+      currentUserName={user.name}
       currentUserRole={currentUserRole}
       initialContent={document.content}
       initialTitle={document.title}
