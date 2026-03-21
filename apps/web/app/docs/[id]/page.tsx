@@ -49,6 +49,7 @@ export default async function DocumentPage({ params }: DocumentPageProps) {
   return (
     <DocumentEditor
       documentId={document.id}
+      currentUserId={user.id}
       initialText={getTextContent(document.content)}
       initialTitle={document.title}
       updatedAt={document.updatedAt.toISOString()}
