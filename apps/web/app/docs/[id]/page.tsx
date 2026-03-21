@@ -9,23 +9,6 @@ type DocumentPageProps = {
   params: Promise<{ id: string }>;
 };
 
-const getTextContent = (value: unknown) => {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    "text" in value &&
-    typeof value.text === "string"
-  ) {
-    return value.text;
-  }
-
-  return "";
-};
-
 export default async function DocumentPage({ params }: DocumentPageProps) {
   const { id } = await params;
   const user = await requireCurrentUser();
@@ -67,7 +50,7 @@ export default async function DocumentPage({ params }: DocumentPageProps) {
       documentId={document.id}
       currentUserId={user.id}
       currentUserRole={currentUserRole}
-      initialText={getTextContent(document.content)}
+      initialContent={document.content}
       initialTitle={document.title}
       updatedAt={document.updatedAt.toISOString()}
     />

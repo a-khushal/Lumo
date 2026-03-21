@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import StarterKit from "@tiptap/starter-kit";
+import { EditorContent, useEditor } from "@tiptap/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type DocumentEditorProps = {
@@ -8,7 +10,7 @@ type DocumentEditorProps = {
   currentUserId: string;
   currentUserRole: DocumentRole;
   initialTitle: string;
-  initialText: string;
+  initialContent: unknown;
   updatedAt: string;
 };
 
@@ -48,6 +50,12 @@ type ApiError = {
 };
 
 type InviteStatus = "idle" | "submitting" | "error" | "success";
+type EditorDoc = Record<string, unknown>;
+
+const emptyDoc: EditorDoc = {
+  type: "doc",
+  content: [{ type: "paragraph" }],
+};
 
 const formatUpdatedAt = (updatedAt: string) => {
   return new Intl.DateTimeFormat("en", {
@@ -75,16 +83,56 @@ const formatName = (user: MemberUser) => {
   return user.email;
 };
 
+const toParagraphDoc = (text: string) => {
+  const normalizedText = text.trim();
+
+  if (!normalizedText) {
+    return emptyDoc;
+  }
+
+  return {
+    type: "doc",
+    content: [
+      {
+        type: "paragraph",
+        content: [{ type: "text", text: normalizedText }],
+      },
+    ],
+  } satisfies EditorDoc;
+};
+
+const normalizeEditorContent = (value: unknown): EditorDoc => {
+  if (typeof value === "string") {
+    return toParagraphDoc(value);
+  }
+
+  if (value && typeof value === "object") {
+    if ("type" in value && value.type === "doc") {
+      return value as EditorDoc;
+    }
+
+    if ("text" in value && typeof value.text === "string") {
+      return toParagraphDoc(value.text);
+    }
+  }
+
+  return emptyDoc;
+};
+
 export function DocumentEditor({
   documentId,
   currentUserId,
   currentUserRole,
   initialTitle,
-  initialText,
+  initialContent,
   updatedAt,
 }: DocumentEditorProps) {
+  const startingContent = useMemo(
+    () => normalizeEditorContent(initialContent),
+    [initialContent],
+  );
   const [title, setTitle] = useState(initialTitle);
-  const [text, setText] = useState(initialText);
+  const [content, setContent] = useState<EditorDoc>(startingContent);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [lastSavedAt, setLastSavedAt] = useState(updatedAt);
   const [isShareOpen, setIsShareOpen] = useState(false);
@@ -101,11 +149,40 @@ export function DocumentEditor({
     type: "updating-role" | "removing";
   } | null>(null);
   const lastPayloadRef = useRef(
-    JSON.stringify({ title: initialTitle, content: { text: initialText } }),
+    JSON.stringify({ title: initialTitle, content: startingContent }),
   );
 
   const canManageMembers = owner?.user.id === currentUserId;
   const canEdit = currentUserRole === "OWNER" || currentUserRole === "EDITOR";
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: {
+          levels: [1, 2],
+        },
+      }),
+    ],
+    editable: canEdit,
+    content: startingContent,
+    editorProps: {
+      attributes: {
+        class:
+          "min-h-[66vh] w-full border-0 bg-transparent p-4 text-base leading-relaxed text-ink outline-none",
+      },
+    },
+    onUpdate({
+      editor: currentEditor,
+    }: {
+      editor: { getJSON: () => unknown };
+    }) {
+      setContent(currentEditor.getJSON() as EditorDoc);
+    },
+  });
+
+  useEffect(() => {
+    editor?.setEditable(canEdit);
+  }, [canEdit, editor]);
 
   const loadMembers = useCallback(async () => {
     setIsMembersLoading(true);
@@ -161,7 +238,7 @@ export function DocumentEditor({
 
     const payload = JSON.stringify({
       title: title.trim() || "Untitled document",
-      content: { text },
+      content,
     });
 
     if (payload === lastPayloadRef.current) {
@@ -199,7 +276,7 @@ export function DocumentEditor({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [canEdit, documentId, text, title]);
+  }, [canEdit, content, documentId, title]);
 
   const handleInviteSubmit = async (
     event: React.FormEvent<HTMLFormElement>,
@@ -496,13 +573,108 @@ export function DocumentEditor({
       ) : null}
 
       <section className="mt-5 overflow-hidden rounded-2xl border border-border bg-panel shadow-card">
-        <textarea
-          className="min-h-[66vh] w-full resize-y border-0 bg-transparent p-4 text-base leading-relaxed text-ink outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-muted"
-          disabled={!canEdit}
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          placeholder="Start typing your document..."
-        />
+        <div className="flex flex-wrap gap-2 border-b border-border bg-slate-50 p-3">
+          <button
+            className={`rounded-md border px-3 py-1.5 text-sm font-medium transition ${
+              editor?.isActive("heading", { level: 1 })
+                ? "border-accent bg-emerald-50 text-accent-strong"
+                : "border-border bg-panel text-ink hover:bg-slate-100"
+            }`}
+            type="button"
+            disabled={!canEdit}
+            onClick={() =>
+              editor?.chain().focus().toggleHeading({ level: 1 }).run()
+            }
+          >
+            H1
+          </button>
+          <button
+            className={`rounded-md border px-3 py-1.5 text-sm font-medium transition ${
+              editor?.isActive("heading", { level: 2 })
+                ? "border-accent bg-emerald-50 text-accent-strong"
+                : "border-border bg-panel text-ink hover:bg-slate-100"
+            }`}
+            type="button"
+            disabled={!canEdit}
+            onClick={() =>
+              editor?.chain().focus().toggleHeading({ level: 2 }).run()
+            }
+          >
+            H2
+          </button>
+          <button
+            className={`rounded-md border px-3 py-1.5 text-sm font-medium transition ${
+              editor?.isActive("bold")
+                ? "border-accent bg-emerald-50 text-accent-strong"
+                : "border-border bg-panel text-ink hover:bg-slate-100"
+            }`}
+            type="button"
+            disabled={!canEdit}
+            onClick={() => editor?.chain().focus().toggleBold().run()}
+          >
+            Bold
+          </button>
+          <button
+            className={`rounded-md border px-3 py-1.5 text-sm font-medium transition ${
+              editor?.isActive("italic")
+                ? "border-accent bg-emerald-50 text-accent-strong"
+                : "border-border bg-panel text-ink hover:bg-slate-100"
+            }`}
+            type="button"
+            disabled={!canEdit}
+            onClick={() => editor?.chain().focus().toggleItalic().run()}
+          >
+            Italic
+          </button>
+          <button
+            className={`rounded-md border px-3 py-1.5 text-sm font-medium transition ${
+              editor?.isActive("bulletList")
+                ? "border-accent bg-emerald-50 text-accent-strong"
+                : "border-border bg-panel text-ink hover:bg-slate-100"
+            }`}
+            type="button"
+            disabled={!canEdit}
+            onClick={() => editor?.chain().focus().toggleBulletList().run()}
+          >
+            Bullet list
+          </button>
+          <button
+            className={`rounded-md border px-3 py-1.5 text-sm font-medium transition ${
+              editor?.isActive("orderedList")
+                ? "border-accent bg-emerald-50 text-accent-strong"
+                : "border-border bg-panel text-ink hover:bg-slate-100"
+            }`}
+            type="button"
+            disabled={!canEdit}
+            onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+          >
+            Numbered list
+          </button>
+          <button
+            className="rounded-md border border-border bg-panel px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+            type="button"
+            disabled={!canEdit}
+            onClick={() => editor?.chain().focus().undo().run()}
+          >
+            Undo
+          </button>
+          <button
+            className="rounded-md border border-border bg-panel px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+            type="button"
+            disabled={!canEdit}
+            onClick={() => editor?.chain().focus().redo().run()}
+          >
+            Redo
+          </button>
+        </div>
+
+        {editor ? (
+          <EditorContent editor={editor} />
+        ) : (
+          <div className="min-h-[66vh] p-4 text-sm text-muted">
+            Loading editor...
+          </div>
+        )}
       </section>
     </main>
   );

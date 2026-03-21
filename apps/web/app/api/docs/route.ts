@@ -62,7 +62,10 @@ export async function POST(request: Request) {
     data: {
       ownerId: user.id,
       title: normalizeTitle(body?.title),
-      content: { text: "" } satisfies Prisma.InputJsonValue,
+      content: {
+        type: "doc",
+        content: [{ type: "paragraph" }],
+      } satisfies Prisma.InputJsonValue,
     },
     select: {
       id: true,

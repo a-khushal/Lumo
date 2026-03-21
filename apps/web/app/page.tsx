@@ -15,7 +15,10 @@ const createDocument = async () => {
     data: {
       ownerId: user.id,
       title: "Untitled document",
-      content: { text: "" },
+      content: {
+        type: "doc",
+        content: [{ type: "paragraph" }],
+      },
     },
     select: {
       id: true,
