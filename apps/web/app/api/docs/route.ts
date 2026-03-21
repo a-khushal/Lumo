@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, Prisma } from "@repo/db";
-import { getOrCreateDemoUser } from "../../../lib/demo-user";
+import { getCurrentUser } from "../../../lib/current-user";
 
 type CreateDocInput = {
   title?: unknown;
@@ -24,7 +24,11 @@ const normalizeTitle = (title: unknown) => {
 };
 
 export async function GET() {
-  const user = await getOrCreateDemoUser();
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const documents = await db.document.findMany({
     where: {
@@ -46,7 +50,12 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const user = await getOrCreateDemoUser();
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const body = await readJsonBody<CreateDocInput>(request);
 
   const document = await db.document.create({

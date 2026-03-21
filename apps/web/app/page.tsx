@@ -1,14 +1,15 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { db } from "@repo/db";
-import { getOrCreateDemoUser } from "../lib/demo-user";
+import { signOutUser } from "../lib/auth";
+import { requireCurrentUser } from "../lib/current-user";
 
 export const dynamic = "force-dynamic";
 
 const createDocument = async () => {
   "use server";
 
-  const user = await getOrCreateDemoUser();
+  const user = await requireCurrentUser();
 
   const document = await db.document.create({
     data: {
@@ -24,8 +25,14 @@ const createDocument = async () => {
   redirect(`/docs/${document.id}`);
 };
 
+const logout = async () => {
+  "use server";
+
+  await signOutUser("/sign-in");
+};
+
 export default async function Home() {
-  const user = await getOrCreateDemoUser();
+  const user = await requireCurrentUser();
 
   const documents = await db.document.findMany({
     where: {
@@ -54,14 +61,25 @@ export default async function Home() {
           </h1>
           <p className="mt-1 text-sm text-muted">Signed in as {user.email}</p>
         </div>
-        <form action={createDocument}>
-          <button
-            className="rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-accent-strong"
-            type="submit"
-          >
-            New document
-          </button>
-        </form>
+        <div className="flex items-center gap-2">
+          <form action={createDocument}>
+            <button
+              className="rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-accent-strong"
+              type="submit"
+            >
+              New document
+            </button>
+          </form>
+
+          <form action={logout}>
+            <button
+              className="rounded-full border border-border bg-panel px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-slate-50"
+              type="submit"
+            >
+              Sign out
+            </button>
+          </form>
+        </div>
       </header>
 
       <section className="mt-5 overflow-hidden rounded-2xl border border-border bg-panel shadow-card">

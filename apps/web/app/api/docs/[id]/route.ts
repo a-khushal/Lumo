@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, Prisma } from "@repo/db";
-import { getOrCreateDemoUser } from "../../../../lib/demo-user";
+import { getCurrentUser } from "../../../../lib/current-user";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -42,7 +42,11 @@ const readJsonBody = async <T>(request: Request): Promise<T | null> => {
 
 export async function GET(_request: Request, context: RouteContext) {
   const { id } = await context.params;
-  const user = await getOrCreateDemoUser();
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const document = await db.document.findFirst({
     where: {
@@ -68,7 +72,12 @@ export async function GET(_request: Request, context: RouteContext) {
 
 export async function PATCH(request: Request, context: RouteContext) {
   const { id } = await context.params;
-  const user = await getOrCreateDemoUser();
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const body = await readJsonBody<UpdateDocInput>(request);
 
   const editorAccess = await db.document.findFirst({
@@ -108,10 +117,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   if (Object.keys(updateData).length === 0) {
-    return NextResponse.json(
-      { error: "Nothing to update" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
   const document = await db.document.update({
@@ -128,5 +134,8 @@ export async function PATCH(request: Request, context: RouteContext) {
     },
   });
 
-  return NextResponse.json({ document, updatedAt: document.updatedAt.toISOString() });
+  return NextResponse.json({
+    document,
+    updatedAt: document.updatedAt.toISOString(),
+  });
 }

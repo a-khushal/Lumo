@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@repo/db";
-import { getOrCreateDemoUser } from "../../../../../lib/demo-user";
+import { getCurrentUser } from "../../../../../lib/current-user";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -34,7 +34,11 @@ const normalizeRole = (role: unknown) => {
 
   const normalized = role.trim().toUpperCase();
 
-  if (ALLOWED_MEMBER_ROLES.includes(normalized as (typeof ALLOWED_MEMBER_ROLES)[number])) {
+  if (
+    ALLOWED_MEMBER_ROLES.includes(
+      normalized as (typeof ALLOWED_MEMBER_ROLES)[number],
+    )
+  ) {
     return normalized as (typeof ALLOWED_MEMBER_ROLES)[number];
   }
 
@@ -65,7 +69,11 @@ export async function GET(
   context: RouteContext,
 ): Promise<Response> {
   const { id } = await context.params;
-  const user = await getOrCreateDemoUser();
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const document = await db.document.findFirst({
     where: {
@@ -120,7 +128,11 @@ export async function POST(
   context: RouteContext,
 ): Promise<Response> {
   const { id } = await context.params;
-  const user = await getOrCreateDemoUser();
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const document = await db.document.findFirst({
     where: {
@@ -143,7 +155,10 @@ export async function POST(
   const role = normalizeRole(body?.role);
 
   if (!email) {
-    return NextResponse.json({ error: "Valid email is required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Valid email is required" },
+      { status: 400 },
+    );
   }
 
   if (!role) {
@@ -215,8 +230,5 @@ export async function POST(
         },
       });
 
-  return NextResponse.json(
-    { member },
-    { status: existingMember ? 200 : 201 },
-  );
+  return NextResponse.json({ member }, { status: existingMember ? 200 : 201 });
 }

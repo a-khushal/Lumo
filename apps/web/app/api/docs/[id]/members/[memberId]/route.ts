@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@repo/db";
-import { getOrCreateDemoUser } from "../../../../../../lib/demo-user";
+import { getCurrentUser } from "../../../../../../lib/current-user";
 
 type RouteContext = {
   params: Promise<{ id: string; memberId: string }>;
@@ -19,7 +19,11 @@ const normalizeRole = (role: unknown) => {
 
   const normalized = role.trim().toUpperCase();
 
-  if (ALLOWED_MEMBER_ROLES.includes(normalized as (typeof ALLOWED_MEMBER_ROLES)[number])) {
+  if (
+    ALLOWED_MEMBER_ROLES.includes(
+      normalized as (typeof ALLOWED_MEMBER_ROLES)[number],
+    )
+  ) {
     return normalized as (typeof ALLOWED_MEMBER_ROLES)[number];
   }
 
@@ -52,7 +56,12 @@ export async function PATCH(
   context: RouteContext,
 ): Promise<Response> {
   const { id, memberId } = await context.params;
-  const user = await getOrCreateDemoUser();
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const body = await readJsonBody<UpdateMemberInput>(request);
   const role = normalizeRole(body?.role);
 
@@ -112,7 +121,11 @@ export async function DELETE(
   context: RouteContext,
 ): Promise<Response> {
   const { id, memberId } = await context.params;
-  const user = await getOrCreateDemoUser();
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const ownerAccess = await ensureOwnerAccess(id, user.id);
 

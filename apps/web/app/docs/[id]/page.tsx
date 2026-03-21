@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { db } from "@repo/db";
-import { getOrCreateDemoUser } from "../../../lib/demo-user";
+import { requireCurrentUser } from "../../../lib/current-user";
 import { DocumentEditor } from "./document-editor";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +28,7 @@ const getTextContent = (value: unknown) => {
 
 export default async function DocumentPage({ params }: DocumentPageProps) {
   const { id } = await params;
-  const user = await getOrCreateDemoUser();
+  const user = await requireCurrentUser();
 
   const document = await db.document.findFirst({
     where: {
