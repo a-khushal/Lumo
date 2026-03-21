@@ -5,8 +5,10 @@
     "DATABASE_URL",
     "DEMO_USER_EMAIL",
     "DEMO_USER_NAME",
+    "NEXTAUTH_SECRET",
     "NEXT_PUBLIC_COLLAB_URL",
-    "COLLAB_PORT"
+    "COLLAB_PORT",
+    "COLLAB_TOKEN_SECRET"
   ],
   "tasks": {
     "build": {

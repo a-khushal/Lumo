@@ -3,6 +3,7 @@ import path from "node:path";
 import { config as loadEnv } from "dotenv";
 import { Server } from "@hocuspocus/server";
 import { TiptapTransformer } from "@hocuspocus/transformer";
+import { jwtVerify, type JWTPayload } from "jose";
 import type { Prisma } from "@repo/db";
 
 const envCandidates = [
@@ -20,6 +21,41 @@ envCandidates.forEach((filePath) => {
 const { db } = await import("@repo/db");
 
 const COLLAB_PORT = Number(process.env.COLLAB_PORT ?? 1234);
+
+const getCollabSecret = () => {
+  const value = process.env.COLLAB_TOKEN_SECRET ?? process.env.NEXTAUTH_SECRET;
+
+  if (!value) {
+    throw new Error(
+      "COLLAB_TOKEN_SECRET (or NEXTAUTH_SECRET) is required for collaboration auth",
+    );
+  }
+
+  return new TextEncoder().encode(value);
+};
+
+type CollabPayload = JWTPayload & {
+  doc?: unknown;
+};
+
+const verifyCollabToken = async (token: string, documentId: string) => {
+  const { payload } = await jwtVerify<CollabPayload>(token, getCollabSecret(), {
+    issuer: "docs-web",
+    audience: "docs-collab",
+  });
+
+  const userId = payload.sub;
+
+  if (typeof userId !== "string" || !userId) {
+    throw new Error("Unauthorized");
+  }
+
+  if (payload.doc !== documentId) {
+    throw new Error("Unauthorized");
+  }
+
+  return userId;
+};
 
 const emptyDocument: Prisma.InputJsonValue = {
   type: "doc",
@@ -62,7 +98,15 @@ const server = new Server({
       throw new Error("Unauthorized");
     }
 
-    const access = await hasAccess(documentName, token);
+    let userId = "";
+
+    try {
+      userId = await verifyCollabToken(token, documentName);
+    } catch {
+      throw new Error("Unauthorized");
+    }
+
+    const access = await hasAccess(documentName, userId);
 
     if (!access) {
       throw new Error("Forbidden");
@@ -70,7 +114,7 @@ const server = new Server({
 
     return {
       user: {
-        id: token,
+        id: userId,
       },
     };
   },

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { db } from "@repo/db";
+import { createCollabToken } from "../../../lib/collab-token";
 import { requireCurrentUser } from "../../../lib/current-user";
 import { DocumentEditor } from "./document-editor";
 
@@ -45,12 +46,18 @@ export default async function DocumentPage({ params }: DocumentPageProps) {
       ? "OWNER"
       : (document.members[0]?.role ?? "VIEWER");
 
+  const collabToken = await createCollabToken({
+    userId: user.id,
+    documentId: document.id,
+  });
+
   return (
     <DocumentEditor
       documentId={document.id}
       currentUserId={user.id}
       currentUserEmail={user.email}
       currentUserName={user.name}
+      collabToken={collabToken}
       currentUserRole={currentUserRole}
       initialContent={document.content}
       initialTitle={document.title}

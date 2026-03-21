@@ -13,7 +13,8 @@
     "@hocuspocus/server": "^3.4.0",
     "@hocuspocus/transformer": "^3.4.0",
     "@repo/db": "*",
-    "dotenv": "^17.2.3"
+    "dotenv": "^17.2.3",
+    "jose": "^6.1.0"
   },
   "devDependencies": {
     "@repo/typescript-config": "*",

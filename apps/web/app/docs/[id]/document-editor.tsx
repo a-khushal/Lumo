@@ -13,6 +13,7 @@ type DocumentEditorProps = {
   currentUserId: string;
   currentUserEmail: string;
   currentUserName: string | null;
+  collabToken: string;
   currentUserRole: DocumentRole;
   initialTitle: string;
   initialContent: unknown;
@@ -179,6 +180,7 @@ export function DocumentEditor({
   currentUserId,
   currentUserEmail,
   currentUserName,
+  collabToken,
   currentUserRole,
   initialTitle,
   initialContent,
@@ -226,11 +228,11 @@ export function DocumentEditor({
       url: collabUrl,
       name: documentId,
       document,
-      token: currentUserId,
+      token: collabToken,
     });
 
     return { document, provider };
-  }, [documentId, currentUserId]);
+  }, [collabToken, documentId]);
 
   useEffect(() => {
     if (collaborationState.provider.awareness) {
