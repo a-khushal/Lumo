@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 type DocumentEditorProps = {
   documentId: string;
   currentUserId: string;
+  currentUserRole: DocumentRole;
   initialTitle: string;
   initialText: string;
   updatedAt: string;
@@ -13,6 +14,7 @@ type DocumentEditorProps = {
 
 type SaveState = "saved" | "saving" | "error";
 type InviteRole = "EDITOR" | "COMMENTER" | "VIEWER";
+type DocumentRole = "OWNER" | InviteRole;
 
 type MemberUser = {
   id: string;
@@ -76,6 +78,7 @@ const formatName = (user: MemberUser) => {
 export function DocumentEditor({
   documentId,
   currentUserId,
+  currentUserRole,
   initialTitle,
   initialText,
   updatedAt,
@@ -102,6 +105,7 @@ export function DocumentEditor({
   );
 
   const canManageMembers = owner?.user.id === currentUserId;
+  const canEdit = currentUserRole === "OWNER" || currentUserRole === "EDITOR";
 
   const loadMembers = useCallback(async () => {
     setIsMembersLoading(true);
@@ -127,6 +131,10 @@ export function DocumentEditor({
   }, [documentId]);
 
   const statusLabel = useMemo(() => {
+    if (!canEdit) {
+      return `Read-only (${currentUserRole})`;
+    }
+
     if (saveState === "saving") {
       return "Saving...";
     }
@@ -136,7 +144,7 @@ export function DocumentEditor({
     }
 
     return `Saved ${formatUpdatedAt(lastSavedAt)}`;
-  }, [lastSavedAt, saveState]);
+  }, [canEdit, currentUserRole, lastSavedAt, saveState]);
 
   useEffect(() => {
     if (!isShareOpen) {
@@ -147,6 +155,10 @@ export function DocumentEditor({
   }, [isShareOpen, loadMembers]);
 
   useEffect(() => {
+    if (!canEdit) {
+      return;
+    }
+
     const payload = JSON.stringify({
       title: title.trim() || "Untitled document",
       content: { text },
@@ -187,7 +199,7 @@ export function DocumentEditor({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [documentId, text, title]);
+  }, [canEdit, documentId, text, title]);
 
   const handleInviteSubmit = async (
     event: React.FormEvent<HTMLFormElement>,
@@ -314,7 +326,8 @@ export function DocumentEditor({
             Back
           </Link>
           <input
-            className="w-full rounded-xl border border-border bg-panel px-3 py-2 text-sm text-ink shadow-sm outline-none ring-accent/40 transition focus:ring-2 sm:w-[min(66vw,540px)]"
+            className="w-full rounded-xl border border-border bg-panel px-3 py-2 text-sm text-ink shadow-sm outline-none ring-accent/40 transition focus:ring-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-muted sm:w-[min(66vw,540px)]"
+            disabled={!canEdit}
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Untitled document"
@@ -331,6 +344,12 @@ export function DocumentEditor({
           <p className="text-sm text-muted">{statusLabel}</p>
         </div>
       </header>
+
+      {!canEdit ? (
+        <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
+          You have {currentUserRole} access. Editing is disabled.
+        </p>
+      ) : null}
 
       {isShareOpen ? (
         <section className="mt-4 rounded-2xl border border-border bg-panel p-4 shadow-card">
@@ -478,7 +497,8 @@ export function DocumentEditor({
 
       <section className="mt-5 overflow-hidden rounded-2xl border border-border bg-panel shadow-card">
         <textarea
-          className="min-h-[66vh] w-full resize-y border-0 bg-transparent p-4 text-base leading-relaxed text-ink outline-none"
+          className="min-h-[66vh] w-full resize-y border-0 bg-transparent p-4 text-base leading-relaxed text-ink outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-muted"
+          disabled={!canEdit}
           value={text}
           onChange={(event) => setText(event.target.value)}
           placeholder="Start typing your document..."

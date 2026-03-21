@@ -3,6 +3,8 @@ import { db } from "@repo/db";
 import { getOrCreateDemoUser } from "../../../lib/demo-user";
 import { DocumentEditor } from "./document-editor";
 
+export const dynamic = "force-dynamic";
+
 type DocumentPageProps = {
   params: Promise<{ id: string }>;
 };
@@ -39,6 +41,15 @@ export default async function DocumentPage({ params }: DocumentPageProps) {
       title: true,
       content: true,
       updatedAt: true,
+      ownerId: true,
+      members: {
+        where: {
+          userId: user.id,
+        },
+        select: {
+          role: true,
+        },
+      },
     },
   });
 
@@ -46,10 +57,16 @@ export default async function DocumentPage({ params }: DocumentPageProps) {
     notFound();
   }
 
+  const currentUserRole =
+    document.ownerId === user.id
+      ? "OWNER"
+      : (document.members[0]?.role ?? "VIEWER");
+
   return (
     <DocumentEditor
       documentId={document.id}
       currentUserId={user.id}
+      currentUserRole={currentUserRole}
       initialText={getTextContent(document.content)}
       initialTitle={document.title}
       updatedAt={document.updatedAt.toISOString()}

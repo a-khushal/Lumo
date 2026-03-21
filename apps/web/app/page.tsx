@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { db } from "@repo/db";
 import { getOrCreateDemoUser } from "../lib/demo-user";
 
+export const dynamic = "force-dynamic";
+
 const createDocument = async () => {
   "use server";
 
