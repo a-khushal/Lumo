@@ -22,14 +22,27 @@ const normalizeTitle = (title: unknown) => {
 
 const normalizeContent = (content: unknown): Prisma.InputJsonValue => {
   if (typeof content === "string") {
-    return { text: content };
+    return {
+      type: "doc",
+      content: content.trim()
+        ? [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: content.trim() }],
+            },
+          ]
+        : [{ type: "paragraph" }],
+    } satisfies Prisma.InputJsonValue;
   }
 
   if (content && typeof content === "object") {
     return content as Prisma.InputJsonValue;
   }
 
-  return { text: "" };
+  return {
+    type: "doc",
+    content: [{ type: "paragraph" }],
+  } satisfies Prisma.InputJsonValue;
 };
 
 const readJsonBody = async <T>(request: Request): Promise<T | null> => {

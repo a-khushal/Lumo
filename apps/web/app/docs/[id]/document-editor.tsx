@@ -45,6 +45,31 @@ type MemberMutationResponse = {
   member: MemberResponse;
 };
 
+type SnapshotResponse = {
+  id: string;
+  version: number;
+  createdAt: string;
+  createdBy: MemberUser | null;
+};
+
+type SnapshotsResponse = {
+  snapshots: SnapshotResponse[];
+};
+
+type SnapshotMutationResponse = {
+  snapshot: SnapshotResponse;
+};
+
+type RestoreSnapshotResponse = {
+  restoredFromVersion: number;
+  document: {
+    title: string;
+    content: unknown;
+    updatedAt: string;
+  };
+  snapshot: SnapshotResponse;
+};
+
 type ApiError = {
   error?: string;
 };
@@ -136,10 +161,15 @@ export function DocumentEditor({
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [lastSavedAt, setLastSavedAt] = useState(updatedAt);
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isMembersLoading, setIsMembersLoading] = useState(false);
+  const [isSnapshotsLoading, setIsSnapshotsLoading] = useState(false);
+  const [isCreatingSnapshot, setIsCreatingSnapshot] = useState(false);
   const [membersError, setMembersError] = useState<string | null>(null);
+  const [snapshotsError, setSnapshotsError] = useState<string | null>(null);
   const [owner, setOwner] = useState<OwnerResponse | null>(null);
   const [members, setMembers] = useState<MemberResponse[]>([]);
+  const [snapshots, setSnapshots] = useState<SnapshotResponse[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<InviteRole>("EDITOR");
   const [inviteStatus, setInviteStatus] = useState<InviteStatus>("idle");
@@ -148,6 +178,7 @@ export function DocumentEditor({
     memberId: string;
     type: "updating-role" | "removing";
   } | null>(null);
+  const [snapshotActionId, setSnapshotActionId] = useState<string | null>(null);
   const lastPayloadRef = useRef(
     JSON.stringify({ title: initialTitle, content: startingContent }),
   );
@@ -168,7 +199,7 @@ export function DocumentEditor({
     editorProps: {
       attributes: {
         class:
-          "min-h-[66vh] w-full border-0 bg-transparent p-4 text-base leading-relaxed text-ink outline-none",
+          "min-h-[66vh] w-full border-0 bg-transparent p-4 text-base leading-relaxed text-ink outline-none [&_h1]:mb-3 [&_h1]:text-3xl [&_h1]:font-semibold [&_h2]:mb-3 [&_h2]:text-2xl [&_h2]:font-semibold [&_p]:mb-3 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6",
       },
     },
     onUpdate({
@@ -207,6 +238,28 @@ export function DocumentEditor({
     }
   }, [documentId]);
 
+  const loadSnapshots = useCallback(async () => {
+    setIsSnapshotsLoading(true);
+    setSnapshotsError(null);
+
+    try {
+      const response = await fetch(`/api/docs/${documentId}/snapshots`);
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
+
+      const data = (await response.json()) as SnapshotsResponse;
+      setSnapshots(data.snapshots);
+    } catch (error) {
+      setSnapshotsError(
+        error instanceof Error ? error.message : "Failed to load versions",
+      );
+    } finally {
+      setIsSnapshotsLoading(false);
+    }
+  }, [documentId]);
+
   const statusLabel = useMemo(() => {
     if (!canEdit) {
       return `Read-only (${currentUserRole})`;
@@ -230,6 +283,14 @@ export function DocumentEditor({
 
     void loadMembers();
   }, [isShareOpen, loadMembers]);
+
+  useEffect(() => {
+    if (!isHistoryOpen) {
+      return;
+    }
+
+    void loadSnapshots();
+  }, [isHistoryOpen, loadSnapshots]);
 
   useEffect(() => {
     if (!canEdit) {
@@ -392,6 +453,96 @@ export function DocumentEditor({
     }
   };
 
+  const handleCreateSnapshot = async () => {
+    if (!canEdit) {
+      return;
+    }
+
+    setIsCreatingSnapshot(true);
+    setSnapshotsError(null);
+
+    try {
+      const response = await fetch(`/api/docs/${documentId}/snapshots`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
+
+      const data = (await response.json()) as SnapshotMutationResponse;
+
+      setSnapshots((prev) => {
+        const next = [data.snapshot, ...prev];
+        const deduped = next.filter(
+          (snapshot, index) =>
+            next.findIndex((item) => item.id === snapshot.id) === index,
+        );
+
+        return deduped;
+      });
+    } catch (error) {
+      setSnapshotsError(
+        error instanceof Error ? error.message : "Failed to save version",
+      );
+    } finally {
+      setIsCreatingSnapshot(false);
+    }
+  };
+
+  const handleRestoreSnapshot = async (snapshot: SnapshotResponse) => {
+    if (!canEdit) {
+      return;
+    }
+
+    setSnapshotActionId(snapshot.id);
+    setSnapshotsError(null);
+
+    try {
+      const response = await fetch(
+        `/api/docs/${documentId}/snapshots/${snapshot.id}/restore`,
+        {
+          method: "POST",
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
+
+      const data = (await response.json()) as RestoreSnapshotResponse;
+      const nextContent = normalizeEditorContent(data.document.content);
+      const nextTitle = data.document.title;
+      const nextPayload = JSON.stringify({
+        title: nextTitle.trim() || "Untitled document",
+        content: nextContent,
+      });
+
+      lastPayloadRef.current = nextPayload;
+      setTitle(nextTitle);
+      setContent(nextContent);
+      editor?.commands.setContent(nextContent, false);
+      setSaveState("saved");
+      setLastSavedAt(data.document.updatedAt);
+
+      setSnapshots((prev) => {
+        const next = [data.snapshot, ...prev];
+        const deduped = next.filter(
+          (item, index) =>
+            next.findIndex((row) => row.id === item.id) === index,
+        );
+
+        return deduped;
+      });
+    } catch (error) {
+      setSnapshotsError(
+        error instanceof Error ? error.message : "Failed to restore version",
+      );
+    } finally {
+      setSnapshotActionId(null);
+    }
+  };
+
   return (
     <main className="mx-auto w-full max-w-5xl px-5 pb-12 pt-10 sm:px-8">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -411,13 +562,22 @@ export function DocumentEditor({
           />
         </div>
         <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-end">
-          <button
-            className="rounded-full border border-border bg-panel px-4 py-2 text-sm font-medium text-ink transition hover:bg-slate-50"
-            type="button"
-            onClick={() => setIsShareOpen((value) => !value)}
-          >
-            {isShareOpen ? "Close" : "Share"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded-full border border-border bg-panel px-4 py-2 text-sm font-medium text-ink transition hover:bg-slate-50"
+              type="button"
+              onClick={() => setIsHistoryOpen((value) => !value)}
+            >
+              {isHistoryOpen ? "Close history" : "History"}
+            </button>
+            <button
+              className="rounded-full border border-border bg-panel px-4 py-2 text-sm font-medium text-ink transition hover:bg-slate-50"
+              type="button"
+              onClick={() => setIsShareOpen((value) => !value)}
+            >
+              {isShareOpen ? "Close" : "Share"}
+            </button>
+          </div>
           <p className="text-sm text-muted">{statusLabel}</p>
         </div>
       </header>
@@ -426,6 +586,86 @@ export function DocumentEditor({
         <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
           You have {currentUserRole} access. Editing is disabled.
         </p>
+      ) : null}
+
+      {isHistoryOpen ? (
+        <section className="mt-4 rounded-2xl border border-border bg-panel p-4 shadow-card">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-ink">
+                Version history
+              </h2>
+              <p className="text-sm text-muted">
+                Restore older versions when needed.
+              </p>
+            </div>
+
+            {canEdit ? (
+              <button
+                className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60"
+                type="button"
+                onClick={() => {
+                  void handleCreateSnapshot();
+                }}
+                disabled={isCreatingSnapshot}
+              >
+                {isCreatingSnapshot ? "Saving..." : "Save version"}
+              </button>
+            ) : null}
+          </div>
+
+          {isSnapshotsLoading ? (
+            <p className="text-sm text-muted">Loading versions...</p>
+          ) : null}
+
+          {snapshotsError ? (
+            <p className="mb-3 text-sm font-medium text-rose-700">
+              {snapshotsError}
+            </p>
+          ) : null}
+
+          <ul className="grid gap-2">
+            {snapshots.map((snapshot) => {
+              const isRestoring = snapshotActionId === snapshot.id;
+
+              return (
+                <li
+                  className="flex flex-col gap-2 rounded-xl border border-border bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between"
+                  key={snapshot.id}
+                >
+                  <div>
+                    <p className="font-semibold text-ink">
+                      Version {snapshot.version}
+                    </p>
+                    <p className="text-sm text-muted">
+                      {formatUpdatedAt(snapshot.createdAt)}
+                      {snapshot.createdBy
+                        ? ` by ${formatName(snapshot.createdBy)}`
+                        : ""}
+                    </p>
+                  </div>
+
+                  {canEdit ? (
+                    <button
+                      className="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-medium text-ink transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      type="button"
+                      disabled={isRestoring}
+                      onClick={() => {
+                        void handleRestoreSnapshot(snapshot);
+                      }}
+                    >
+                      {isRestoring ? "Restoring..." : "Restore"}
+                    </button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+
+          {!isSnapshotsLoading && snapshots.length === 0 ? (
+            <p className="mt-3 text-sm text-muted">No versions yet.</p>
+          ) : null}
+        </section>
       ) : null}
 
       {isShareOpen ? (
