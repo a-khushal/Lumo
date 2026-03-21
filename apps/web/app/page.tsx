@@ -41,30 +41,48 @@ export default async function Home() {
   });
 
   return (
-    <main className="dashboard">
-      <header className="dashboardHeader">
+    <main className="mx-auto w-full max-w-5xl px-5 pb-12 pt-10 sm:px-8">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="eyebrow">Docs MVP</p>
-          <h1>My documents</h1>
-          <p className="muted">Signed in as {user.email}</p>
+          <p className="text-xs font-bold uppercase tracking-[0.08em] text-accent-strong">
+            Docs MVP
+          </p>
+          <h1 className="mt-1 text-3xl font-semibold text-ink sm:text-4xl">
+            My documents
+          </h1>
+          <p className="mt-1 text-sm text-muted">Signed in as {user.email}</p>
         </div>
         <form action={createDocument}>
-          <button className="primaryButton" type="submit">
+          <button
+            className="rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-accent-strong"
+            type="submit"
+          >
             New document
           </button>
         </form>
       </header>
 
-      <section className="listCard">
+      <section className="mt-5 overflow-hidden rounded-2xl border border-border bg-panel shadow-card">
         {documents.length === 0 ? (
-          <p className="emptyText">No docs yet. Create your first document.</p>
+          <p className="p-4 text-sm text-muted">
+            No docs yet. Create your first document.
+          </p>
         ) : (
-          <ul className="docList">
+          <ul>
             {documents.map((document) => (
-              <li key={document.id}>
-                <Link className="docLink" href={`/docs/${document.id}`}>
-                  <span>{document.title}</span>
-                  <time dateTime={document.updatedAt.toISOString()}>
+              <li
+                className="border-t border-border first:border-t-0"
+                key={document.id}
+              >
+                <Link
+                  className="flex flex-col gap-1 px-4 py-4 transition hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                  href={`/docs/${document.id}`}
+                >
+                  <span className="font-medium text-ink">{document.title}</span>
+                  <time
+                    className="text-sm text-muted"
+                    dateTime={document.updatedAt.toISOString()}
+                  >
                     {new Intl.DateTimeFormat("en", {
                       dateStyle: "medium",
                       timeStyle: "short",

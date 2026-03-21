@@ -304,67 +304,83 @@ export function DocumentEditor({
   };
 
   return (
-    <main className="editorPage">
-      <header className="editorHeader">
-        <div className="editorTitleWrap">
-          <Link href="/" className="backLink">
+    <main className="mx-auto w-full max-w-5xl px-5 pb-12 pt-10 sm:px-8">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center sm:gap-4">
+          <Link
+            href="/"
+            className="text-sm font-medium text-muted hover:text-ink"
+          >
             Back
           </Link>
           <input
-            className="titleInput"
+            className="w-full rounded-xl border border-border bg-panel px-3 py-2 text-sm text-ink shadow-sm outline-none ring-accent/40 transition focus:ring-2 sm:w-[min(66vw,540px)]"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Untitled document"
           />
         </div>
-        <div className="editorActions">
+        <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-end">
           <button
-            className="shareButton"
+            className="rounded-full border border-border bg-panel px-4 py-2 text-sm font-medium text-ink transition hover:bg-slate-50"
             type="button"
             onClick={() => setIsShareOpen((value) => !value)}
           >
             {isShareOpen ? "Close" : "Share"}
           </button>
-          <p className="saveStatus">{statusLabel}</p>
+          <p className="text-sm text-muted">{statusLabel}</p>
         </div>
       </header>
 
       {isShareOpen ? (
-        <section className="shareCard">
-          <div className="shareCardHeader">
-            <h2>Share settings</h2>
+        <section className="mt-4 rounded-2xl border border-border bg-panel p-4 shadow-card">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold text-ink">Share settings</h2>
             {isMembersLoading ? (
-              <span className="muted">Loading...</span>
+              <span className="text-sm text-muted">Loading...</span>
             ) : null}
           </div>
 
-          {membersError ? <p className="errorText">{membersError}</p> : null}
+          {membersError ? (
+            <p className="mb-3 text-sm font-medium text-rose-700">
+              {membersError}
+            </p>
+          ) : null}
 
           {owner ? (
-            <div className="shareOwnerRow">
+            <div className="mb-3 flex flex-col gap-3 rounded-xl border border-border bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="shareName">{formatName(owner.user)}</p>
-                <p className="muted">{owner.user.email}</p>
+                <p className="font-semibold text-ink">
+                  {formatName(owner.user)}
+                </p>
+                <p className="text-sm text-muted">{owner.user.email}</p>
               </div>
-              <span className="rolePill">OWNER</span>
+              <span className="w-fit rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-accent-strong">
+                OWNER
+              </span>
             </div>
           ) : null}
 
-          <ul className="shareMemberList">
+          <ul className="grid gap-2">
             {members.map((member) => {
               const isBusy = memberAction?.memberId === member.id;
 
               return (
-                <li className="shareMemberRow" key={member.id}>
+                <li
+                  className="flex flex-col gap-3 rounded-xl border border-border bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between"
+                  key={member.id}
+                >
                   <div>
-                    <p className="shareName">{formatName(member.user)}</p>
-                    <p className="muted">{member.user.email}</p>
+                    <p className="font-semibold text-ink">
+                      {formatName(member.user)}
+                    </p>
+                    <p className="text-sm text-muted">{member.user.email}</p>
                   </div>
 
                   {canManageMembers ? (
-                    <div className="shareMemberControls">
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                       <select
-                        className="shareSelect"
+                        className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink outline-none ring-accent/40 focus:ring-2"
                         value={member.role}
                         disabled={isBusy}
                         onChange={(event) => {
@@ -382,7 +398,7 @@ export function DocumentEditor({
                       </select>
 
                       <button
-                        className="dangerButton"
+                        className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
                         type="button"
                         disabled={isBusy}
                         onClick={() => {
@@ -393,7 +409,9 @@ export function DocumentEditor({
                       </button>
                     </div>
                   ) : (
-                    <span className="rolePill">{member.role}</span>
+                    <span className="w-fit rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-accent-strong">
+                      {member.role}
+                    </span>
                   )}
                 </li>
               );
@@ -401,14 +419,14 @@ export function DocumentEditor({
           </ul>
 
           {!isMembersLoading && members.length === 0 ? (
-            <p className="muted">No shared members yet.</p>
+            <p className="mt-3 text-sm text-muted">No shared members yet.</p>
           ) : null}
 
           {canManageMembers ? (
-            <form className="shareInviteForm" onSubmit={handleInviteSubmit}>
-              <div className="shareInviteRow">
+            <form className="mt-4 grid gap-2" onSubmit={handleInviteSubmit}>
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
                 <input
-                  className="shareInput"
+                  className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink outline-none ring-accent/40 focus:ring-2"
                   type="email"
                   placeholder="teammate@company.com"
                   value={inviteEmail}
@@ -416,7 +434,7 @@ export function DocumentEditor({
                 />
 
                 <select
-                  className="shareSelect"
+                  className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink outline-none ring-accent/40 focus:ring-2"
                   value={inviteRole}
                   onChange={(event) =>
                     setInviteRole(event.target.value as InviteRole)
@@ -430,7 +448,7 @@ export function DocumentEditor({
                 </select>
 
                 <button
-                  className="primaryButton smallButton"
+                  className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60"
                   type="submit"
                   disabled={inviteStatus === "submitting"}
                 >
@@ -441,7 +459,9 @@ export function DocumentEditor({
               {inviteMessage ? (
                 <p
                   className={
-                    inviteStatus === "error" ? "errorText" : "statusText"
+                    inviteStatus === "error"
+                      ? "text-sm font-medium text-rose-700"
+                      : "text-sm font-medium text-accent-strong"
                   }
                 >
                   {inviteMessage}
@@ -449,14 +469,16 @@ export function DocumentEditor({
               ) : null}
             </form>
           ) : (
-            <p className="muted">Only the owner can change sharing settings.</p>
+            <p className="mt-3 text-sm text-muted">
+              Only the owner can change sharing settings.
+            </p>
           )}
         </section>
       ) : null}
 
-      <section className="editorCard">
+      <section className="mt-5 overflow-hidden rounded-2xl border border-border bg-panel shadow-card">
         <textarea
-          className="editorTextarea"
+          className="min-h-[66vh] w-full resize-y border-0 bg-transparent p-4 text-base leading-relaxed text-ink outline-none"
           value={text}
           onChange={(event) => setText(event.target.value)}
           placeholder="Start typing your document..."
