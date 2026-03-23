@@ -1,7 +1,11 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { config as loadEnv } from "dotenv";
-import { Server } from "@hocuspocus/server";
+import {
+  Server,
+  type beforeSyncPayload,
+  type onAuthenticatePayload,
+} from "@hocuspocus/server";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import { jwtVerify, type JWTPayload } from "jose";
 import type { Prisma } from "@repo/db";
@@ -21,6 +25,10 @@ envCandidates.forEach((filePath) => {
 const { db } = await import("@repo/db");
 
 const COLLAB_PORT = Number(process.env.COLLAB_PORT ?? 1234);
+const STORE_DEBOUNCE_MS = Number(process.env.COLLAB_STORE_DEBOUNCE_MS ?? 1200);
+const STORE_MAX_DEBOUNCE_MS = Number(
+  process.env.COLLAB_STORE_MAX_DEBOUNCE_MS ?? 5000,
+);
 
 const getCollabSecret = () => {
   const value = process.env.COLLAB_TOKEN_SECRET ?? process.env.NEXTAUTH_SECRET;
@@ -70,7 +78,9 @@ const normalizeJson = (value: Prisma.JsonValue): Prisma.InputJsonValue => {
   return emptyDocument;
 };
 
-const hasAccess = async (documentId: string, userId: string) => {
+const persistedContentByDoc = new Map<string, string>();
+
+const getAccess = async (documentId: string, userId: string) => {
   const document = await db.document.findFirst({
     where: {
       id: documentId,
@@ -78,21 +88,44 @@ const hasAccess = async (documentId: string, userId: string) => {
       OR: [{ ownerId: userId }, { members: { some: { userId } } }],
     },
     select: {
-      id: true,
+      ownerId: true,
+      members: {
+        where: {
+          userId,
+        },
+        select: {
+          role: true,
+        },
+        take: 1,
+      },
     },
   });
 
-  return Boolean(document);
+  if (!document) {
+    return null;
+  }
+
+  const role = document.members[0]?.role;
+  const canWrite =
+    document.ownerId === userId || role === "OWNER" || role === "EDITOR";
+
+  return {
+    canWrite,
+  };
 };
 
 const server = new Server({
   port: COLLAB_PORT,
+  debounce: STORE_DEBOUNCE_MS,
+  maxDebounce: STORE_MAX_DEBOUNCE_MS,
   async onAuthenticate({
     token,
     documentName,
+    connectionConfig,
   }: {
-    token: unknown;
-    documentName: string;
+    token: onAuthenticatePayload["token"];
+    documentName: onAuthenticatePayload["documentName"];
+    connectionConfig: onAuthenticatePayload["connectionConfig"];
   }) {
     if (typeof token !== "string" || !token) {
       throw new Error("Unauthorized");
@@ -106,17 +139,29 @@ const server = new Server({
       throw new Error("Unauthorized");
     }
 
-    const access = await hasAccess(documentName, userId);
+    const access = await getAccess(documentName, userId);
 
     if (!access) {
       throw new Error("Forbidden");
     }
 
+    connectionConfig.readOnly = !access.canWrite;
+
     return {
       user: {
         id: userId,
       },
+      canWrite: access.canWrite,
     };
+  },
+  async beforeSync({ type, context }: beforeSyncPayload) {
+    if (type !== 2) {
+      return;
+    }
+
+    if (context?.canWrite === false) {
+      throw new Error("No edit access");
+    }
   },
   async onLoadDocument({ documentName }: { documentName: string }) {
     const document = await db.document.findFirst({
@@ -133,6 +178,11 @@ const server = new Server({
       throw new Error("Document not found");
     }
 
+    persistedContentByDoc.set(
+      documentName,
+      JSON.stringify(normalizeJson(document.content)),
+    );
+
     return TiptapTransformer.toYdoc(normalizeJson(document.content), "default");
   },
   async onStoreDocument({
@@ -147,6 +197,12 @@ const server = new Server({
       "default",
     );
 
+    const serialized = JSON.stringify(content);
+
+    if (persistedContentByDoc.get(documentName) === serialized) {
+      return;
+    }
+
     await db.document.update({
       where: {
         id: documentName,
@@ -155,6 +211,11 @@ const server = new Server({
         content: content as Prisma.InputJsonValue,
       },
     });
+
+    persistedContentByDoc.set(documentName, serialized);
+  },
+  async afterUnloadDocument({ documentName }) {
+    persistedContentByDoc.delete(documentName);
   },
 });
 
