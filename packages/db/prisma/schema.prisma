@@ -15,28 +15,31 @@ enum MemberRole {
 }
 
 model User {
-  id             String             @id @default(cuid())
-  email          String             @unique
-  name           String?
-  imageUrl       String?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  documents      Document[]
-  memberships    DocumentMember[]
-  createdSnaps   DocumentSnapshot[]
+  id                String            @id @default(cuid())
+  email             String            @unique
+  name              String?
+  imageUrl          String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  documents         Document[]
+  memberships       DocumentMember[]
+  createdSnaps      DocumentSnapshot[]
+  authoredComments  DocumentComment[] @relation("CommentAuthor")
+  resolvedComments  DocumentComment[] @relation("CommentResolver")
 }
 
 model Document {
-  id         String             @id @default(cuid())
-  title      String             @default("Untitled document")
+  id         String            @id @default(cuid())
+  title      String            @default("Untitled document")
   content    Json
   ownerId    String
-  isArchived Boolean            @default(false)
-  createdAt  DateTime           @default(now())
-  updatedAt  DateTime           @updatedAt
-  owner      User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  isArchived Boolean           @default(false)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  owner      User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   members    DocumentMember[]
   snapshots  DocumentSnapshot[]
+  comments   DocumentComment[]
 
   @@index([ownerId])
   @@index([updatedAt])
@@ -68,4 +71,30 @@ model DocumentSnapshot {
   @@unique([documentId, version])
   @@index([documentId, createdAt])
   @@index([createdById])
+}
+
+model DocumentComment {
+  id            String            @id @default(cuid())
+  documentId    String
+  authorId      String
+  parentId      String?
+  content       String
+  quotedText    String?
+  selectionFrom Int?
+  selectionTo   Int?
+  isResolved    Boolean           @default(false)
+  resolvedAt    DateTime?
+  resolvedById  String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  document      Document          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  author        User              @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  parent        DocumentComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies       DocumentComment[] @relation("CommentReplies")
+  resolvedBy    User?             @relation("CommentResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([documentId, createdAt])
+  @@index([authorId])
+  @@index([parentId])
+  @@index([resolvedById])
 }

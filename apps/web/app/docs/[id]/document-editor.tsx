@@ -76,6 +76,39 @@ type RestoreSnapshotResponse = {
   snapshot: SnapshotResponse;
 };
 
+type CommentReplyResponse = {
+  id: string;
+  parentId: string | null;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+  author: MemberUser;
+};
+
+type CommentThreadResponse = {
+  id: string;
+  parentId: string | null;
+  content: string;
+  quotedText: string | null;
+  selectionFrom: number | null;
+  selectionTo: number | null;
+  isResolved: boolean;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  author: MemberUser;
+  resolvedBy: MemberUser | null;
+  replies: CommentReplyResponse[];
+};
+
+type CommentsResponse = {
+  comments: CommentThreadResponse[];
+};
+
+type CommentMutationResponse = {
+  comment: CommentThreadResponse;
+};
+
 type ApiError = {
   error?: string;
 };
@@ -175,6 +208,50 @@ const getUserColor = (id: string) => {
   return palette[Math.abs(hash) % palette.length] ?? palette[0];
 };
 
+const getSelectionPayload = (
+  editorInstance:
+    | {
+        state: {
+          selection: {
+            from: number;
+            to: number;
+            empty: boolean;
+          };
+          doc: {
+            textBetween: (
+              from: number,
+              to: number,
+              blockSeparator?: string,
+            ) => string;
+          };
+        };
+      }
+    | null
+    | undefined,
+) => {
+  if (!editorInstance) {
+    return null;
+  }
+
+  const { from, to, empty } = editorInstance.state.selection;
+
+  if (empty) {
+    return null;
+  }
+
+  const text = editorInstance.state.doc.textBetween(from, to, " ").trim();
+
+  if (!text) {
+    return null;
+  }
+
+  return {
+    quotedText: text.slice(0, 300),
+    selectionFrom: from,
+    selectionTo: to,
+  };
+};
+
 export function DocumentEditor({
   documentId,
   currentUserId,
@@ -196,14 +273,24 @@ export function DocumentEditor({
   const [lastSavedAt, setLastSavedAt] = useState(updatedAt);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isCommentsOpen, setIsCommentsOpen] = useState(false);
   const [isMembersLoading, setIsMembersLoading] = useState(false);
   const [isSnapshotsLoading, setIsSnapshotsLoading] = useState(false);
+  const [isCommentsLoading, setIsCommentsLoading] = useState(false);
   const [isCreatingSnapshot, setIsCreatingSnapshot] = useState(false);
+  const [isCreatingComment, setIsCreatingComment] = useState(false);
   const [membersError, setMembersError] = useState<string | null>(null);
   const [snapshotsError, setSnapshotsError] = useState<string | null>(null);
+  const [commentsError, setCommentsError] = useState<string | null>(null);
   const [owner, setOwner] = useState<OwnerResponse | null>(null);
   const [members, setMembers] = useState<MemberResponse[]>([]);
   const [snapshots, setSnapshots] = useState<SnapshotResponse[]>([]);
+  const [commentThreads, setCommentThreads] = useState<CommentThreadResponse[]>(
+    [],
+  );
+  const [commentDraft, setCommentDraft] = useState("");
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [selectedText, setSelectedText] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<InviteRole>("EDITOR");
   const [inviteStatus, setInviteStatus] = useState<InviteStatus>("idle");
@@ -213,6 +300,7 @@ export function DocumentEditor({
     type: "updating-role" | "removing";
   } | null>(null);
   const [snapshotActionId, setSnapshotActionId] = useState<string | null>(null);
+  const [commentActionId, setCommentActionId] = useState<string | null>(null);
   const [collabStatus, setCollabStatus] = useState<CollabStatus>("connecting");
   const [activeCollaborators, setActiveCollaborators] = useState(1);
   const lastPayloadRef = useRef(
@@ -221,6 +309,10 @@ export function DocumentEditor({
 
   const canManageMembers = owner?.user.id === currentUserId;
   const canEdit = currentUserRole === "OWNER" || currentUserRole === "EDITOR";
+  const canComment =
+    currentUserRole === "OWNER" ||
+    currentUserRole === "EDITOR" ||
+    currentUserRole === "COMMENTER";
 
   const collaborationState = useMemo(() => {
     const document = new Y.Doc();
@@ -303,6 +395,29 @@ export function DocumentEditor({
       }) {
         setContent(currentEditor.getJSON() as EditorDoc);
       },
+      onSelectionUpdate({
+        editor: currentEditor,
+      }: {
+        editor: {
+          state: {
+            selection: {
+              from: number;
+              to: number;
+              empty: boolean;
+            };
+            doc: {
+              textBetween: (
+                from: number,
+                to: number,
+                blockSeparator?: string,
+              ) => string;
+            };
+          };
+        };
+      }) {
+        const selection = getSelectionPayload(currentEditor);
+        setSelectedText(selection?.quotedText ?? "");
+      },
     },
     [collaborationState],
   );
@@ -356,6 +471,28 @@ export function DocumentEditor({
     }
   }, [documentId]);
 
+  const loadComments = useCallback(async () => {
+    setIsCommentsLoading(true);
+    setCommentsError(null);
+
+    try {
+      const response = await fetch(`/api/docs/${documentId}/comments`);
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
+
+      const data = (await response.json()) as CommentsResponse;
+      setCommentThreads(data.comments);
+    } catch (error) {
+      setCommentsError(
+        error instanceof Error ? error.message : "Failed to load comments",
+      );
+    } finally {
+      setIsCommentsLoading(false);
+    }
+  }, [documentId]);
+
   const statusLabel = useMemo(() => {
     if (!canEdit) {
       return `Read-only (${currentUserRole})`;
@@ -387,6 +524,14 @@ export function DocumentEditor({
 
     void loadSnapshots();
   }, [isHistoryOpen, loadSnapshots]);
+
+  useEffect(() => {
+    if (!isCommentsOpen) {
+      return;
+    }
+
+    void loadComments();
+  }, [isCommentsOpen, loadComments]);
 
   useEffect(() => {
     if (!canEdit) {
@@ -639,6 +784,145 @@ export function DocumentEditor({
     }
   };
 
+  const handleCreateComment = async (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+
+    if (!canComment) {
+      return;
+    }
+
+    const contentValue = commentDraft.trim();
+
+    if (!contentValue) {
+      setCommentsError("Comment content is required");
+      return;
+    }
+
+    const selection = getSelectionPayload(editor);
+
+    setIsCreatingComment(true);
+    setCommentsError(null);
+
+    try {
+      const response = await fetch(`/api/docs/${documentId}/comments`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          content: contentValue,
+          quotedText: selection?.quotedText,
+          selectionFrom: selection?.selectionFrom,
+          selectionTo: selection?.selectionTo,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
+
+      const data = (await response.json()) as CommentMutationResponse;
+
+      setCommentThreads((prev) => [...prev, data.comment]);
+      setCommentDraft("");
+      setSelectedText("");
+    } catch (error) {
+      setCommentsError(
+        error instanceof Error ? error.message : "Failed to create comment",
+      );
+    } finally {
+      setIsCreatingComment(false);
+    }
+  };
+
+  const handleReplyChange = (threadId: string, value: string) => {
+    setReplyDrafts((prev) => ({
+      ...prev,
+      [threadId]: value,
+    }));
+  };
+
+  const handleReplySubmit = async (threadId: string) => {
+    if (!canComment) {
+      return;
+    }
+
+    const contentValue = (replyDrafts[threadId] ?? "").trim();
+
+    if (!contentValue) {
+      setCommentsError("Reply content is required");
+      return;
+    }
+
+    setCommentActionId(threadId);
+    setCommentsError(null);
+
+    try {
+      const response = await fetch(
+        `/api/docs/${documentId}/comments/${threadId}/reply`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ content: contentValue }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
+
+      await loadComments();
+      setReplyDrafts((prev) => ({
+        ...prev,
+        [threadId]: "",
+      }));
+    } catch (error) {
+      setCommentsError(
+        error instanceof Error ? error.message : "Failed to add reply",
+      );
+    } finally {
+      setCommentActionId(null);
+    }
+  };
+
+  const handleResolveToggle = async (threadId: string, resolved: boolean) => {
+    if (!canComment) {
+      return;
+    }
+
+    setCommentActionId(threadId);
+    setCommentsError(null);
+
+    try {
+      const response = await fetch(
+        `/api/docs/${documentId}/comments/${threadId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ resolved }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
+
+      await loadComments();
+    } catch (error) {
+      setCommentsError(
+        error instanceof Error ? error.message : "Failed to update thread",
+      );
+    } finally {
+      setCommentActionId(null);
+    }
+  };
+
   return (
     <main className="mx-auto w-full max-w-5xl px-5 pb-12 pt-10 sm:px-8">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -665,6 +949,13 @@ export function DocumentEditor({
               onClick={() => setIsHistoryOpen((value) => !value)}
             >
               {isHistoryOpen ? "Close history" : "History"}
+            </button>
+            <button
+              className="rounded-full border border-border bg-panel px-4 py-2 text-sm font-medium text-ink transition hover:bg-slate-50"
+              type="button"
+              onClick={() => setIsCommentsOpen((value) => !value)}
+            >
+              {isCommentsOpen ? "Close comments" : "Comments"}
             </button>
             <button
               className="rounded-full border border-border bg-panel px-4 py-2 text-sm font-medium text-ink transition hover:bg-slate-50"
@@ -762,6 +1053,164 @@ export function DocumentEditor({
 
           {!isSnapshotsLoading && snapshots.length === 0 ? (
             <p className="mt-3 text-sm text-muted">No versions yet.</p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {isCommentsOpen ? (
+        <section className="mt-4 rounded-2xl border border-border bg-panel p-4 shadow-card">
+          <div className="mb-3">
+            <h2 className="text-base font-semibold text-ink">Comments</h2>
+            <p className="text-sm text-muted">
+              Start a thread on selected text and discuss changes.
+            </p>
+          </div>
+
+          {canComment ? (
+            <form className="mb-4 grid gap-2" onSubmit={handleCreateComment}>
+              <textarea
+                className="min-h-20 rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink outline-none ring-accent/40 focus:ring-2"
+                value={commentDraft}
+                onChange={(event) => setCommentDraft(event.target.value)}
+                placeholder="Add a comment"
+              />
+
+              {selectedText ? (
+                <p className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm text-accent-strong">
+                  Selected: &quot;{selectedText}&quot;
+                </p>
+              ) : (
+                <p className="text-sm text-muted">
+                  Tip: highlight text in the editor to attach this comment to a
+                  selection.
+                </p>
+              )}
+
+              <div className="flex justify-end">
+                <button
+                  className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60"
+                  type="submit"
+                  disabled={isCreatingComment}
+                >
+                  {isCreatingComment ? "Posting..." : "Post comment"}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <p className="mb-4 text-sm text-muted">
+              You can read comments but cannot post with your current role.
+            </p>
+          )}
+
+          {isCommentsLoading ? (
+            <p className="text-sm text-muted">Loading comments...</p>
+          ) : null}
+
+          {commentsError ? (
+            <p className="mb-3 text-sm font-medium text-rose-700">
+              {commentsError}
+            </p>
+          ) : null}
+
+          <ul className="grid gap-3">
+            {commentThreads.map((thread) => {
+              const isBusy = commentActionId === thread.id;
+
+              return (
+                <li
+                  className="rounded-xl border border-border bg-slate-50 p-3"
+                  key={thread.id}
+                >
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-ink">
+                      {formatName(thread.author)}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted">
+                        {formatUpdatedAt(thread.createdAt)}
+                      </span>
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                          thread.isResolved
+                            ? "border-emerald-200 bg-emerald-50 text-accent-strong"
+                            : "border-amber-200 bg-amber-50 text-amber-700"
+                        }`}
+                      >
+                        {thread.isResolved ? "Resolved" : "Open"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {thread.quotedText ? (
+                    <p className="mb-2 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1 text-sm text-accent-strong">
+                      &quot;{thread.quotedText}&quot;
+                    </p>
+                  ) : null}
+
+                  <p className="text-sm text-ink">{thread.content}</p>
+
+                  <ul className="mt-3 grid gap-2">
+                    {thread.replies.map((reply) => (
+                      <li
+                        className="rounded-lg border border-border bg-panel px-3 py-2"
+                        key={reply.id}
+                      >
+                        <p className="text-xs font-semibold text-ink">
+                          {formatName(reply.author)}
+                        </p>
+                        <p className="mt-1 text-sm text-ink">{reply.content}</p>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className="mt-3 grid gap-2">
+                    {canComment ? (
+                      <>
+                        <textarea
+                          className="min-h-16 rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink outline-none ring-accent/40 focus:ring-2"
+                          value={replyDrafts[thread.id] ?? ""}
+                          onChange={(event) =>
+                            handleReplyChange(thread.id, event.target.value)
+                          }
+                          placeholder="Reply to thread"
+                        />
+
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <button
+                            className="rounded-lg border border-border bg-panel px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => {
+                              void handleReplySubmit(thread.id);
+                            }}
+                          >
+                            {isBusy ? "Saving..." : "Reply"}
+                          </button>
+
+                          <button
+                            className="rounded-lg border border-border bg-panel px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => {
+                              void handleResolveToggle(
+                                thread.id,
+                                !thread.isResolved,
+                              );
+                            }}
+                          >
+                            {thread.isResolved ? "Reopen" : "Resolve"}
+                          </button>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+
+          {!isCommentsLoading && commentThreads.length === 0 ? (
+            <p className="mt-2 text-sm text-muted">No comments yet.</p>
           ) : null}
         </section>
       ) : null}
