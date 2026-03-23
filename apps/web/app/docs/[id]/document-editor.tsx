@@ -28,6 +28,11 @@ type DocumentEditorProps = {
 type SaveState = "saved" | "saving" | "error";
 type InviteRole = "EDITOR" | "COMMENTER" | "VIEWER";
 type DocumentRole = "OWNER" | InviteRole;
+type Collaborator = {
+  id: string;
+  name: string;
+  color: string;
+};
 
 type MemberUser = {
   id: string;
@@ -210,7 +215,7 @@ const getUserColor = (id: string) => {
     hash |= 0;
   }
 
-  return palette[Math.abs(hash) % palette.length] ?? palette[0];
+  return palette[Math.abs(hash) % palette.length] || "#136f63";
 };
 
 const getSelectionPayload = (
@@ -310,7 +315,13 @@ export function DocumentEditor({
   const [snapshotActionId, setSnapshotActionId] = useState<string | null>(null);
   const [commentActionId, setCommentActionId] = useState<string | null>(null);
   const [collabStatus, setCollabStatus] = useState<CollabStatus>("connecting");
-  const [activeCollaborators, setActiveCollaborators] = useState(1);
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([
+    {
+      id: currentUserId,
+      name: currentUserName || currentUserEmail,
+      color: getUserColor(currentUserId),
+    },
+  ]);
   const lastPayloadRef = useRef(
     JSON.stringify({ title: initialTitle, content: startingContent }),
   );
@@ -369,12 +380,61 @@ export function DocumentEditor({
 
     const handleAwarenessChange = () => {
       if (!collaborationState.provider.awareness) {
-        setActiveCollaborators(1);
+        setCollaborators([
+          {
+            id: currentUserId,
+            name: currentUserName || currentUserEmail,
+            color: getUserColor(currentUserId),
+          },
+        ]);
         return;
       }
 
       const states = collaborationState.provider.awareness.getStates();
-      setActiveCollaborators(Math.max(states.size, 1));
+      const nextCollaborators = new Map<string, Collaborator>();
+
+      states.forEach((stateValue) => {
+        if (!stateValue || typeof stateValue !== "object") {
+          return;
+        }
+
+        const userValue = (stateValue as { user?: unknown }).user;
+
+        if (!userValue || typeof userValue !== "object") {
+          return;
+        }
+
+        const id = (userValue as { id?: unknown }).id;
+
+        if (typeof id !== "string" || !id) {
+          return;
+        }
+
+        const nameValue = (userValue as { name?: unknown }).name;
+        const colorValue = (userValue as { color?: unknown }).color;
+
+        nextCollaborators.set(id, {
+          id,
+          name:
+            typeof nameValue === "string" && nameValue.trim()
+              ? nameValue
+              : "Guest",
+          color:
+            typeof colorValue === "string" && colorValue
+              ? colorValue
+              : getUserColor(id),
+        });
+      });
+
+      if (!nextCollaborators.has(currentUserId)) {
+        nextCollaborators.set(currentUserId, {
+          id: currentUserId,
+          name: currentUserName || currentUserEmail,
+          color: getUserColor(currentUserId),
+        });
+      }
+
+      setCollaborators(Array.from(nextCollaborators.values()));
     };
 
     collaborationState.provider.on("status", handleStatus);
@@ -563,6 +623,24 @@ export function DocumentEditor({
     }
 
     void loadComments();
+  }, [isCommentsOpen, loadComments]);
+
+  useEffect(() => {
+    if (!isCommentsOpen) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      void loadComments();
+    }, 3000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [isCommentsOpen, loadComments]);
 
   useEffect(() => {
@@ -1041,9 +1119,28 @@ export function DocumentEditor({
               {isShareOpen ? "Close" : "Share"}
             </button>
           </div>
-          <p className="text-sm text-muted">
-            {statusLabel} · {collabStatus} · {activeCollaborators} online
-          </p>
+          <div className="flex flex-col items-end gap-1">
+            <p className="text-sm text-muted">
+              {statusLabel} · {collabStatus} · {collaborators.length} online
+            </p>
+            <div className="flex items-center gap-1.5">
+              {collaborators.slice(0, 4).map((collaborator) => (
+                <span
+                  key={collaborator.id}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold text-white"
+                  style={{ backgroundColor: collaborator.color }}
+                  title={collaborator.name}
+                >
+                  {collaborator.name.slice(0, 1).toUpperCase()}
+                </span>
+              ))}
+              {collaborators.length > 4 ? (
+                <span className="rounded-full border border-border bg-panel px-2 py-0.5 text-xs font-medium text-muted">
+                  +{collaborators.length - 4}
+                </span>
+              ) : null}
+            </div>
+          </div>
         </div>
       </header>
 
