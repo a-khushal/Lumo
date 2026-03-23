@@ -7,6 +7,11 @@ import StarterKit from "@tiptap/starter-kit";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
+import {
+  CommentAnchorExtension,
+  syncCommentAnchors,
+  type CommentAnchor,
+} from "./comment-anchor-extension";
 
 type DocumentEditorProps = {
   documentId: string;
@@ -288,6 +293,9 @@ export function DocumentEditor({
   const [commentThreads, setCommentThreads] = useState<CommentThreadResponse[]>(
     [],
   );
+  const [activeCommentThreadId, setActiveCommentThreadId] = useState<
+    string | null
+  >(null);
   const [commentDraft, setCommentDraft] = useState("");
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [selectedText, setSelectedText] = useState("");
@@ -313,6 +321,22 @@ export function DocumentEditor({
     currentUserRole === "OWNER" ||
     currentUserRole === "EDITOR" ||
     currentUserRole === "COMMENTER";
+
+  const commentAnchors = useMemo<CommentAnchor[]>(() => {
+    return commentThreads
+      .filter(
+        (thread) =>
+          thread.selectionFrom !== null &&
+          thread.selectionTo !== null &&
+          thread.selectionTo > thread.selectionFrom,
+      )
+      .map((thread) => ({
+        id: thread.id,
+        from: thread.selectionFrom as number,
+        to: thread.selectionTo as number,
+        isResolved: thread.isResolved,
+      }));
+  }, [commentThreads]);
 
   const collaborationState = useMemo(() => {
     const document = new Y.Doc();
@@ -379,6 +403,7 @@ export function DocumentEditor({
         Collaboration.configure({
           document: collaborationState.document,
         }),
+        CommentAnchorExtension,
       ],
       editable: canEdit,
       content: startingContent,
@@ -425,6 +450,13 @@ export function DocumentEditor({
   useEffect(() => {
     editor?.setEditable(canEdit);
   }, [canEdit, editor]);
+
+  useEffect(() => {
+    syncCommentAnchors(editor, {
+      anchors: commentAnchors,
+      activeThreadId: activeCommentThreadId,
+    });
+  }, [activeCommentThreadId, commentAnchors, editor]);
 
   const loadMembers = useCallback(async () => {
     setIsMembersLoading(true);
@@ -532,6 +564,28 @@ export function DocumentEditor({
 
     void loadComments();
   }, [isCommentsOpen, loadComments]);
+
+  useEffect(() => {
+    if (isCommentsOpen) {
+      return;
+    }
+
+    setActiveCommentThreadId(null);
+  }, [isCommentsOpen]);
+
+  useEffect(() => {
+    if (!activeCommentThreadId) {
+      return;
+    }
+
+    const stillExists = commentThreads.some(
+      (thread) => thread.id === activeCommentThreadId,
+    );
+
+    if (!stillExists) {
+      setActiveCommentThreadId(null);
+    }
+  }, [activeCommentThreadId, commentThreads]);
 
   useEffect(() => {
     if (!canEdit) {
@@ -923,6 +977,28 @@ export function DocumentEditor({
     }
   };
 
+  const jumpToCommentAnchor = (thread: CommentThreadResponse) => {
+    if (
+      !editor ||
+      thread.selectionFrom === null ||
+      thread.selectionTo === null
+    ) {
+      return;
+    }
+
+    const maxPosition = Math.max(editor.state.doc.content.size, 1);
+    const from = Math.min(Math.max(thread.selectionFrom, 1), maxPosition);
+    const to = Math.min(Math.max(thread.selectionTo, 1), maxPosition);
+
+    if (to <= from) {
+      return;
+    }
+
+    setActiveCommentThreadId(thread.id);
+
+    editor.chain().focus().setTextSelection({ from, to }).run();
+  };
+
   return (
     <main className="mx-auto w-full max-w-5xl px-5 pb-12 pt-10 sm:px-8">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1115,17 +1191,33 @@ export function DocumentEditor({
           <ul className="grid gap-3">
             {commentThreads.map((thread) => {
               const isBusy = commentActionId === thread.id;
+              const isActiveThread = activeCommentThreadId === thread.id;
 
               return (
                 <li
-                  className="rounded-xl border border-border bg-slate-50 p-3"
+                  className={`rounded-xl border p-3 ${
+                    isActiveThread
+                      ? "border-amber-300 bg-amber-50"
+                      : "border-border bg-slate-50"
+                  }`}
                   key={thread.id}
+                  onMouseEnter={() => setActiveCommentThreadId(thread.id)}
                 >
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-ink">
                       {formatName(thread.author)}
                     </p>
                     <div className="flex items-center gap-2">
+                      {thread.selectionFrom !== null &&
+                      thread.selectionTo !== null ? (
+                        <button
+                          className="rounded-md border border-border bg-panel px-2 py-1 text-xs font-medium text-ink transition hover:bg-slate-100"
+                          type="button"
+                          onClick={() => jumpToCommentAnchor(thread)}
+                        >
+                          Jump to text
+                        </button>
+                      ) : null}
                       <span className="text-xs text-muted">
                         {formatUpdatedAt(thread.createdAt)}
                       </span>
