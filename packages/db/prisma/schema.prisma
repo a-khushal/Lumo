@@ -14,6 +14,12 @@ enum MemberRole {
   VIEWER
 }
 
+enum SuggestionStatus {
+  OPEN
+  ACCEPTED
+  REJECTED
+}
+
 model User {
   id                String            @id @default(cuid())
   email             String            @unique
@@ -26,6 +32,9 @@ model User {
   createdSnaps      DocumentSnapshot[]
   authoredComments  DocumentComment[] @relation("CommentAuthor")
   resolvedComments  DocumentComment[] @relation("CommentResolver")
+  suggestionAuthors DocumentSuggestion[] @relation("SuggestionAuthor")
+  suggestionReviewers DocumentSuggestion[] @relation("SuggestionReviewer")
+  commentReads      DocumentCommentRead[]
 }
 
 model Document {
@@ -40,6 +49,8 @@ model Document {
   members    DocumentMember[]
   snapshots  DocumentSnapshot[]
   comments   DocumentComment[]
+  suggestions DocumentSuggestion[]
+  commentReads DocumentCommentRead[]
 
   @@index([ownerId])
   @@index([updatedAt])
@@ -97,4 +108,38 @@ model DocumentComment {
   @@index([authorId])
   @@index([parentId])
   @@index([resolvedById])
+}
+
+model DocumentSuggestion {
+  id             String           @id @default(cuid())
+  documentId     String
+  suggestedById  String
+  proposedTitle  String?
+  proposedContent Json
+  status         SuggestionStatus @default(OPEN)
+  reviewedById   String?
+  reviewedAt     DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  document       Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  suggestedBy    User             @relation("SuggestionAuthor", fields: [suggestedById], references: [id], onDelete: Cascade)
+  reviewedBy     User?            @relation("SuggestionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([documentId, createdAt])
+  @@index([suggestedById])
+  @@index([reviewedById])
+  @@index([status])
+}
+
+model DocumentCommentRead {
+  id         String   @id @default(cuid())
+  documentId String
+  userId     String
+  lastReadAt DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, userId])
+  @@index([userId])
 }

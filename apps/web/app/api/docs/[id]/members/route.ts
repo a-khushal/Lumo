@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@repo/db";
+import {
+  canManageDocumentMembers,
+  getDocumentAccess,
+} from "../../../../../lib/document-access";
 import { getCurrentUser } from "../../../../../lib/current-user";
 
 type RouteContext = {
@@ -75,11 +79,16 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const access = await getDocumentAccess({ documentId: id, userId: user.id });
+
+  if (!access) {
+    return NextResponse.json({ error: "Document not found" }, { status: 404 });
+  }
+
   const document = await db.document.findFirst({
     where: {
       id,
       isArchived: false,
-      OR: [{ ownerId: user.id }, { members: { some: { userId: user.id } } }],
     },
     select: {
       id: true,
@@ -134,20 +143,14 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const document = await db.document.findFirst({
-    where: {
-      id,
-      ownerId: user.id,
-      isArchived: false,
-    },
-    select: {
-      id: true,
-      ownerId: true,
-    },
-  });
+  const access = await getDocumentAccess({ documentId: id, userId: user.id });
 
-  if (!document) {
+  if (!access) {
     return NextResponse.json({ error: "Document not found" }, { status: 404 });
+  }
+
+  if (!canManageDocumentMembers(access.role)) {
+    return NextResponse.json({ error: "No member access" }, { status: 403 });
   }
 
   const body = await readJsonBody<InviteMemberInput>(request);
@@ -170,7 +173,7 @@ export async function POST(
 
   const invitedUser = await getOrCreateUserByEmail(email);
 
-  if (invitedUser.id === document.ownerId) {
+  if (invitedUser.id === user.id) {
     return NextResponse.json(
       { error: "Owner already has full access" },
       { status: 400 },
@@ -180,7 +183,7 @@ export async function POST(
   const existingMember = await db.documentMember.findUnique({
     where: {
       documentId_userId: {
-        documentId: document.id,
+        documentId: id,
         userId: invitedUser.id,
       },
     },
@@ -212,7 +215,7 @@ export async function POST(
       })
     : await db.documentMember.create({
         data: {
-          documentId: document.id,
+          documentId: id,
           userId: invitedUser.id,
           role,
         },

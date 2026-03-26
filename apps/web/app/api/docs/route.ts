@@ -46,7 +46,45 @@ export async function GET() {
     },
   });
 
-  return NextResponse.json({ documents });
+  const readStates = await db.documentCommentRead.findMany({
+    where: {
+      userId: user.id,
+      documentId: {
+        in: documents.map((document) => document.id),
+      },
+    },
+    select: {
+      documentId: true,
+      lastReadAt: true,
+    },
+  });
+
+  const readMap = new Map(
+    readStates.map((state) => [state.documentId, state.lastReadAt]),
+  );
+
+  const documentsWithUnread = await Promise.all(
+    documents.map(async (document) => {
+      const unreadCount = await db.documentComment.count({
+        where: {
+          documentId: document.id,
+          authorId: {
+            not: user.id,
+          },
+          createdAt: {
+            gt: readMap.get(document.id) ?? new Date(0),
+          },
+        },
+      });
+
+      return {
+        ...document,
+        unreadCount,
+      };
+    }),
+  );
+
+  return NextResponse.json({ documents: documentsWithUnread });
 }
 
 export async function POST(request: Request) {

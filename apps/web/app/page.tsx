@@ -52,6 +52,44 @@ export default async function Home() {
     },
   });
 
+  const readStates = await db.documentCommentRead.findMany({
+    where: {
+      userId: user.id,
+      documentId: {
+        in: documents.map((document) => document.id),
+      },
+    },
+    select: {
+      documentId: true,
+      lastReadAt: true,
+    },
+  });
+
+  const readMap = new Map(
+    readStates.map((state) => [state.documentId, state.lastReadAt]),
+  );
+
+  const documentsWithUnread = await Promise.all(
+    documents.map(async (document) => {
+      const unreadCount = await db.documentComment.count({
+        where: {
+          documentId: document.id,
+          authorId: {
+            not: user.id,
+          },
+          createdAt: {
+            gt: readMap.get(document.id) ?? new Date(0),
+          },
+        },
+      });
+
+      return {
+        ...document,
+        unreadCount,
+      };
+    }),
+  );
+
   return (
     <main className="mx-auto w-full max-w-5xl px-5 pb-12 pt-10 sm:px-8">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -92,7 +130,7 @@ export default async function Home() {
           </p>
         ) : (
           <ul>
-            {documents.map((document) => (
+            {documentsWithUnread.map((document) => (
               <li
                 className="border-t border-border first:border-t-0"
                 key={document.id}
@@ -101,7 +139,16 @@ export default async function Home() {
                   className="flex flex-col gap-1 px-4 py-4 transition hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
                   href={`/docs/${document.id}`}
                 >
-                  <span className="font-medium text-ink">{document.title}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-ink">
+                      {document.title}
+                    </span>
+                    {document.unreadCount > 0 ? (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                        {document.unreadCount} unread
+                      </span>
+                    ) : null}
+                  </div>
                   <time
                     className="text-sm text-muted"
                     dateTime={document.updatedAt.toISOString()}

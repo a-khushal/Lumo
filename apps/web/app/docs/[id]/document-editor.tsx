@@ -113,6 +113,8 @@ type CommentThreadResponse = {
 
 type CommentsResponse = {
   comments: CommentThreadResponse[];
+  unreadCount: number;
+  lastReadAt: string | null;
 };
 
 type CommentMutationResponse = {
@@ -126,10 +128,36 @@ type ApiError = {
 type InviteStatus = "idle" | "submitting" | "error" | "success";
 type EditorDoc = Record<string, unknown>;
 type CollabStatus = "connecting" | "connected" | "disconnected";
-type CommentsCollabEvent = {
+type CollabEvent = {
   channel?: unknown;
   action?: unknown;
   threadId?: unknown;
+  suggestionId?: unknown;
+};
+
+type SuggestionStatus = "OPEN" | "ACCEPTED" | "REJECTED";
+
+type SuggestionResponse = {
+  id: string;
+  status: SuggestionStatus;
+  proposedTitle: string | null;
+  proposedContent: unknown;
+  createdAt: string;
+  reviewedAt: string | null;
+  suggestedBy: MemberUser;
+  reviewedBy: MemberUser | null;
+};
+
+type SuggestionsResponse = {
+  suggestions: SuggestionResponse[];
+};
+
+type DocumentResponse = {
+  document: {
+    title: string;
+    content: unknown;
+    updatedAt: string;
+  };
 };
 
 const emptyDoc: EditorDoc = {
@@ -289,29 +317,39 @@ export function DocumentEditor({
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isCommentsOpen, setIsCommentsOpen] = useState(false);
+  const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
   const [hasUnreadCommentActivity, setHasUnreadCommentActivity] =
     useState(false);
   const [isMembersLoading, setIsMembersLoading] = useState(false);
   const [isSnapshotsLoading, setIsSnapshotsLoading] = useState(false);
   const [isCommentsLoading, setIsCommentsLoading] = useState(false);
+  const [isSuggestionsLoading, setIsSuggestionsLoading] = useState(false);
   const [isCreatingSnapshot, setIsCreatingSnapshot] = useState(false);
   const [isCreatingComment, setIsCreatingComment] = useState(false);
+  const [isSubmittingSuggestion, setIsSubmittingSuggestion] = useState(false);
   const [membersError, setMembersError] = useState<string | null>(null);
   const [snapshotsError, setSnapshotsError] = useState<string | null>(null);
   const [commentsError, setCommentsError] = useState<string | null>(null);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
   const [owner, setOwner] = useState<OwnerResponse | null>(null);
   const [members, setMembers] = useState<MemberResponse[]>([]);
   const [snapshots, setSnapshots] = useState<SnapshotResponse[]>([]);
   const [commentThreads, setCommentThreads] = useState<CommentThreadResponse[]>(
     [],
   );
+  const [unreadCommentCount, setUnreadCommentCount] = useState(0);
   const [commentsRefreshNonce, setCommentsRefreshNonce] = useState(0);
+  const [suggestionsRefreshNonce, setSuggestionsRefreshNonce] = useState(0);
   const [activeCommentThreadId, setActiveCommentThreadId] = useState<
     string | null
   >(null);
   const [commentDraft, setCommentDraft] = useState("");
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [selectedText, setSelectedText] = useState("");
+  const [editorMode, setEditorMode] = useState<"edit" | "suggest">("edit");
+  const [suggestions, setSuggestions] = useState<SuggestionResponse[]>([]);
+  const [suggestionTitle, setSuggestionTitle] = useState(initialTitle);
+  const [suggestionText, setSuggestionText] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<InviteRole>("EDITOR");
   const [inviteStatus, setInviteStatus] = useState<InviteStatus>("idle");
@@ -322,6 +360,9 @@ export function DocumentEditor({
   } | null>(null);
   const [snapshotActionId, setSnapshotActionId] = useState<string | null>(null);
   const [commentActionId, setCommentActionId] = useState<string | null>(null);
+  const [suggestionActionId, setSuggestionActionId] = useState<string | null>(
+    null,
+  );
   const [collabStatus, setCollabStatus] = useState<CollabStatus>("connecting");
   const [collaborators, setCollaborators] = useState<Collaborator[]>([
     {
@@ -340,6 +381,8 @@ export function DocumentEditor({
     currentUserRole === "OWNER" ||
     currentUserRole === "EDITOR" ||
     currentUserRole === "COMMENTER";
+  const canTypeInEditor = canEdit && editorMode === "edit";
+  const canSubmitSuggestion = canComment && editorMode === "suggest";
 
   const commentAnchors = useMemo<CommentAnchor[]>(() => {
     return commentThreads
@@ -356,6 +399,16 @@ export function DocumentEditor({
         isResolved: thread.isResolved,
       }));
   }, [commentThreads]);
+
+  useEffect(() => {
+    if (!canEdit) {
+      setEditorMode("suggest");
+    }
+  }, [canEdit]);
+
+  useEffect(() => {
+    setSuggestionTitle(title);
+  }, [title]);
 
   const collaborationState = useMemo(() => {
     const document = new Y.Doc();
@@ -450,22 +503,33 @@ export function DocumentEditor({
         return;
       }
 
-      let payload: CommentsCollabEvent | null = null;
+      let payload: CollabEvent | null = null;
 
       try {
-        payload = JSON.parse(event.payload) as CommentsCollabEvent;
+        payload = JSON.parse(event.payload) as CollabEvent;
       } catch {
         return;
       }
 
-      if (!payload || payload.channel !== "comments") {
+      if (!payload) {
         return;
       }
 
-      if (isCommentsOpen) {
-        setCommentsRefreshNonce((prev) => prev + 1);
-      } else {
-        setHasUnreadCommentActivity(true);
+      if (payload.channel === "comments") {
+        if (isCommentsOpen) {
+          setCommentsRefreshNonce((prev) => prev + 1);
+        } else {
+          setHasUnreadCommentActivity(true);
+          setUnreadCommentCount((prev) => prev + 1);
+        }
+
+        return;
+      }
+
+      if (payload.channel === "suggestions") {
+        if (isSuggestionsOpen) {
+          setSuggestionsRefreshNonce((prev) => prev + 1);
+        }
       }
     };
 
@@ -490,6 +554,7 @@ export function DocumentEditor({
     currentUserId,
     currentUserName,
     isCommentsOpen,
+    isSuggestionsOpen,
   ]);
 
   const editor = useEditor(
@@ -505,7 +570,7 @@ export function DocumentEditor({
         }),
         CommentAnchorExtension,
       ],
-      editable: canEdit,
+      editable: canTypeInEditor,
       content: startingContent,
       editorProps: {
         attributes: {
@@ -548,8 +613,8 @@ export function DocumentEditor({
   );
 
   useEffect(() => {
-    editor?.setEditable(canEdit);
-  }, [canEdit, editor]);
+    editor?.setEditable(canTypeInEditor);
+  }, [canTypeInEditor, editor]);
 
   useEffect(() => {
     syncCommentAnchors(editor, {
@@ -616,6 +681,7 @@ export function DocumentEditor({
 
       const data = (await response.json()) as CommentsResponse;
       setCommentThreads(data.comments);
+      setUnreadCommentCount(data.unreadCount);
     } catch (error) {
       setCommentsError(
         error instanceof Error ? error.message : "Failed to load comments",
@@ -625,15 +691,64 @@ export function DocumentEditor({
     }
   }, [documentId]);
 
+  const loadSuggestions = useCallback(async () => {
+    setIsSuggestionsLoading(true);
+    setSuggestionsError(null);
+
+    try {
+      const response = await fetch(`/api/docs/${documentId}/suggestions`);
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
+
+      const data = (await response.json()) as SuggestionsResponse;
+      setSuggestions(data.suggestions);
+    } catch (error) {
+      setSuggestionsError(
+        error instanceof Error ? error.message : "Failed to load suggestions",
+      );
+    } finally {
+      setIsSuggestionsLoading(false);
+    }
+  }, [documentId]);
+
+  useEffect(() => {
+    if (!isSuggestionsOpen || suggestionsRefreshNonce === 0) {
+      return;
+    }
+
+    void loadSuggestions();
+  }, [isSuggestionsOpen, loadSuggestions, suggestionsRefreshNonce]);
+
+  const markCommentsAsRead = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/docs/${documentId}/comments/read`, {
+        method: "POST",
+      });
+
+      if (response.ok) {
+        setUnreadCommentCount(0);
+      }
+    } catch {
+      // Best effort; ignore transient failures.
+    }
+  }, [documentId]);
+
   useEffect(() => {
     if (!isCommentsOpen || commentsRefreshNonce === 0) {
       return;
     }
 
     void loadComments();
-  }, [commentsRefreshNonce, isCommentsOpen, loadComments]);
+    void markCommentsAsRead();
+  }, [commentsRefreshNonce, isCommentsOpen, loadComments, markCommentsAsRead]);
 
   const statusLabel = useMemo(() => {
+    if (editorMode === "suggest") {
+      return "Suggesting mode";
+    }
+
     if (!canEdit) {
       return `Read-only (${currentUserRole})`;
     }
@@ -647,7 +762,12 @@ export function DocumentEditor({
     }
 
     return `Saved ${formatUpdatedAt(lastSavedAt)}`;
-  }, [canEdit, currentUserRole, lastSavedAt, saveState]);
+  }, [canEdit, currentUserRole, editorMode, lastSavedAt, saveState]);
+
+  const openSuggestionCount = useMemo(() => {
+    return suggestions.filter((suggestion) => suggestion.status === "OPEN")
+      .length;
+  }, [suggestions]);
 
   useEffect(() => {
     if (!isShareOpen) {
@@ -671,8 +791,17 @@ export function DocumentEditor({
     }
 
     void loadComments();
+    void markCommentsAsRead();
     setHasUnreadCommentActivity(false);
-  }, [isCommentsOpen, loadComments]);
+  }, [isCommentsOpen, loadComments, markCommentsAsRead]);
+
+  useEffect(() => {
+    if (!isSuggestionsOpen) {
+      return;
+    }
+
+    void loadSuggestions();
+  }, [isSuggestionsOpen, loadSuggestions]);
 
   useEffect(() => {
     if (isCommentsOpen) {
@@ -697,7 +826,7 @@ export function DocumentEditor({
   }, [activeCommentThreadId, commentThreads]);
 
   useEffect(() => {
-    if (!canEdit) {
+    if (!canTypeInEditor) {
       return;
     }
 
@@ -741,7 +870,7 @@ export function DocumentEditor({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [canEdit, content, documentId, title]);
+  }, [canTypeInEditor, content, documentId, title]);
 
   const handleInviteSubmit = async (
     event: React.FormEvent<HTMLFormElement>,
@@ -1086,6 +1215,118 @@ export function DocumentEditor({
     }
   };
 
+  const syncDocumentFromServer = async () => {
+    const response = await fetch(`/api/docs/${documentId}`);
+
+    if (!response.ok) {
+      throw new Error(await parseApiError(response));
+    }
+
+    const data = (await response.json()) as DocumentResponse;
+    const nextContent = normalizeEditorContent(data.document.content);
+    const nextTitle = data.document.title;
+    const nextPayload = JSON.stringify({
+      title: nextTitle.trim() || "Untitled document",
+      content: nextContent,
+    });
+
+    lastPayloadRef.current = nextPayload;
+    setTitle(nextTitle);
+    setContent(nextContent);
+    editor?.commands.setContent(nextContent);
+    setSaveState("saved");
+    setLastSavedAt(data.document.updatedAt);
+  };
+
+  const handleSubmitSuggestion = async (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+
+    if (!canSubmitSuggestion) {
+      return;
+    }
+
+    const normalizedTitle = suggestionTitle.trim();
+    const normalizedText = suggestionText.trim();
+
+    if (!normalizedTitle && !normalizedText) {
+      setSuggestionsError("Add a title or text change for the suggestion.");
+      return;
+    }
+
+    setIsSubmittingSuggestion(true);
+    setSuggestionsError(null);
+
+    try {
+      const response = await fetch(`/api/docs/${documentId}/suggestions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          proposedTitle: normalizedTitle || null,
+          proposedText: normalizedText,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
+
+      setSuggestionText("");
+      setEditorMode(canEdit ? "edit" : "suggest");
+      await loadSuggestions();
+    } catch (error) {
+      setSuggestionsError(
+        error instanceof Error ? error.message : "Failed to create suggestion",
+      );
+    } finally {
+      setIsSubmittingSuggestion(false);
+    }
+  };
+
+  const handleReviewSuggestion = async (
+    suggestionId: string,
+    action: "accept" | "reject",
+  ) => {
+    if (!canEdit) {
+      return;
+    }
+
+    setSuggestionActionId(suggestionId);
+    setSuggestionsError(null);
+
+    try {
+      const response = await fetch(
+        `/api/docs/${documentId}/suggestions/${suggestionId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ action }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
+
+      await loadSuggestions();
+
+      if (action === "accept") {
+        await syncDocumentFromServer();
+      }
+    } catch (error) {
+      setSuggestionsError(
+        error instanceof Error ? error.message : "Failed to review suggestion",
+      );
+    } finally {
+      setSuggestionActionId(null);
+    }
+  };
+
   const jumpToCommentAnchor = (thread: CommentThreadResponse) => {
     if (
       !editor ||
@@ -1120,7 +1361,7 @@ export function DocumentEditor({
           </Link>
           <input
             className="w-full rounded-xl border border-border bg-panel px-3 py-2 text-sm text-ink shadow-sm outline-none ring-accent/40 transition focus:ring-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-muted sm:w-[min(66vw,540px)]"
-            disabled={!canEdit}
+            disabled={!canTypeInEditor}
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Untitled document"
@@ -1128,6 +1369,34 @@ export function DocumentEditor({
         </div>
         <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-end">
           <div className="flex items-center gap-2">
+            {canComment ? (
+              <div className="flex overflow-hidden rounded-full border border-border">
+                <button
+                  className={`px-3 py-1.5 text-xs font-semibold transition ${
+                    editorMode === "edit"
+                      ? "bg-accent text-white"
+                      : "bg-panel text-ink hover:bg-slate-50"
+                  }`}
+                  type="button"
+                  onClick={() => setEditorMode("edit")}
+                  disabled={!canEdit}
+                >
+                  Edit
+                </button>
+                <button
+                  className={`px-3 py-1.5 text-xs font-semibold transition ${
+                    editorMode === "suggest"
+                      ? "bg-accent text-white"
+                      : "bg-panel text-ink hover:bg-slate-50"
+                  }`}
+                  type="button"
+                  onClick={() => setEditorMode("suggest")}
+                  disabled={!canComment}
+                >
+                  Suggest
+                </button>
+              </div>
+            ) : null}
             <button
               className="rounded-full border border-border bg-panel px-4 py-2 text-sm font-medium text-ink transition hover:bg-slate-50"
               type="button"
@@ -1138,11 +1407,28 @@ export function DocumentEditor({
             <button
               className="rounded-full border border-border bg-panel px-4 py-2 text-sm font-medium text-ink transition hover:bg-slate-50"
               type="button"
+              onClick={() => setIsSuggestionsOpen((value) => !value)}
+            >
+              {isSuggestionsOpen ? "Close suggestions" : "Suggestions"}
+              {openSuggestionCount > 0 ? (
+                <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                  {openSuggestionCount}
+                </span>
+              ) : null}
+            </button>
+            <button
+              className="rounded-full border border-border bg-panel px-4 py-2 text-sm font-medium text-ink transition hover:bg-slate-50"
+              type="button"
               onClick={() => setIsCommentsOpen((value) => !value)}
             >
               {isCommentsOpen ? "Close comments" : "Comments"}
               {!isCommentsOpen && hasUnreadCommentActivity ? (
                 <span className="ml-2 inline-block h-2 w-2 rounded-full bg-amber-500" />
+              ) : null}
+              {!isCommentsOpen && unreadCommentCount > 0 ? (
+                <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                  {unreadCommentCount}
+                </span>
               ) : null}
             </button>
             <button
@@ -1178,9 +1464,11 @@ export function DocumentEditor({
         </div>
       </header>
 
-      {!canEdit ? (
+      {!canTypeInEditor ? (
         <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
-          You have {currentUserRole} access. Editing is disabled.
+          {editorMode === "suggest"
+            ? "Suggesting mode is active. Direct editing is disabled."
+            : `You have ${currentUserRole} access. Editing is disabled.`}
         </p>
       ) : null}
 
@@ -1260,6 +1548,133 @@ export function DocumentEditor({
 
           {!isSnapshotsLoading && snapshots.length === 0 ? (
             <p className="mt-3 text-sm text-muted">No versions yet.</p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {isSuggestionsOpen ? (
+        <section className="mt-4 rounded-2xl border border-border bg-panel p-4 shadow-card">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-ink">Suggestions</h2>
+              <p className="text-sm text-muted">
+                Propose document updates and review them.
+              </p>
+            </div>
+            <span className="rounded-full border border-border bg-slate-50 px-2 py-1 text-xs font-semibold text-muted">
+              {openSuggestionCount} open
+            </span>
+          </div>
+
+          {canSubmitSuggestion ? (
+            <form className="mb-4 grid gap-2" onSubmit={handleSubmitSuggestion}>
+              <input
+                className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink outline-none ring-accent/40 focus:ring-2"
+                value={suggestionTitle}
+                onChange={(event) => setSuggestionTitle(event.target.value)}
+                placeholder="Proposed title"
+              />
+              <textarea
+                className="min-h-20 rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink outline-none ring-accent/40 focus:ring-2"
+                value={suggestionText}
+                onChange={(event) => setSuggestionText(event.target.value)}
+                placeholder="Describe the suggested text update"
+              />
+              <div className="flex justify-end">
+                <button
+                  className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60"
+                  type="submit"
+                  disabled={isSubmittingSuggestion}
+                >
+                  {isSubmittingSuggestion
+                    ? "Submitting..."
+                    : "Submit suggestion"}
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {isSuggestionsLoading ? (
+            <p className="text-sm text-muted">Loading suggestions...</p>
+          ) : null}
+
+          {suggestionsError ? (
+            <p className="mb-3 text-sm font-medium text-rose-700">
+              {suggestionsError}
+            </p>
+          ) : null}
+
+          <ul className="grid gap-2">
+            {suggestions.map((suggestion) => {
+              const isBusy = suggestionActionId === suggestion.id;
+
+              return (
+                <li
+                  className="rounded-xl border border-border bg-slate-50 p-3"
+                  key={suggestion.id}
+                >
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-ink">
+                      {formatName(suggestion.suggestedBy)}
+                    </p>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                        suggestion.status === "OPEN"
+                          ? "border-amber-200 bg-amber-50 text-amber-700"
+                          : suggestion.status === "ACCEPTED"
+                            ? "border-emerald-200 bg-emerald-50 text-accent-strong"
+                            : "border-rose-200 bg-rose-50 text-rose-700"
+                      }`}
+                    >
+                      {suggestion.status}
+                    </span>
+                  </div>
+
+                  {suggestion.proposedTitle ? (
+                    <p className="text-sm text-ink">
+                      <span className="font-semibold">Title:</span>{" "}
+                      {suggestion.proposedTitle}
+                    </p>
+                  ) : null}
+
+                  <p className="text-xs text-muted">
+                    Created {formatUpdatedAt(suggestion.createdAt)}
+                    {suggestion.reviewedBy
+                      ? ` · Reviewed by ${formatName(suggestion.reviewedBy)}`
+                      : ""}
+                  </p>
+
+                  {canEdit && suggestion.status === "OPEN" ? (
+                    <div className="mt-3 flex items-center justify-end gap-2">
+                      <button
+                        className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => {
+                          void handleReviewSuggestion(suggestion.id, "reject");
+                        }}
+                      >
+                        Reject
+                      </button>
+                      <button
+                        className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-accent-strong transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => {
+                          void handleReviewSuggestion(suggestion.id, "accept");
+                        }}
+                      >
+                        Accept
+                      </button>
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+
+          {!isSuggestionsLoading && suggestions.length === 0 ? (
+            <p className="mt-2 text-sm text-muted">No suggestions yet.</p>
           ) : null}
         </section>
       ) : null}
@@ -1591,7 +2006,7 @@ export function DocumentEditor({
                 : "border-border bg-panel text-ink hover:bg-slate-100"
             }`}
             type="button"
-            disabled={!canEdit}
+            disabled={!canTypeInEditor}
             onClick={() =>
               editor
                 ?.chain()
@@ -1609,7 +2024,7 @@ export function DocumentEditor({
                 : "border-border bg-panel text-ink hover:bg-slate-100"
             }`}
             type="button"
-            disabled={!canEdit}
+            disabled={!canTypeInEditor}
             onClick={() =>
               editor
                 ?.chain()
@@ -1627,7 +2042,7 @@ export function DocumentEditor({
                 : "border-border bg-panel text-ink hover:bg-slate-100"
             }`}
             type="button"
-            disabled={!canEdit}
+            disabled={!canTypeInEditor}
             onClick={() => editor?.chain().focus().toggleMark("bold").run()}
           >
             Bold
@@ -1639,7 +2054,7 @@ export function DocumentEditor({
                 : "border-border bg-panel text-ink hover:bg-slate-100"
             }`}
             type="button"
-            disabled={!canEdit}
+            disabled={!canTypeInEditor}
             onClick={() => editor?.chain().focus().toggleMark("italic").run()}
           >
             Italic
@@ -1651,7 +2066,7 @@ export function DocumentEditor({
                 : "border-border bg-panel text-ink hover:bg-slate-100"
             }`}
             type="button"
-            disabled={!canEdit}
+            disabled={!canTypeInEditor}
             onClick={() =>
               editor?.chain().focus().toggleList("bulletList", "listItem").run()
             }
@@ -1665,7 +2080,7 @@ export function DocumentEditor({
                 : "border-border bg-panel text-ink hover:bg-slate-100"
             }`}
             type="button"
-            disabled={!canEdit}
+            disabled={!canTypeInEditor}
             onClick={() =>
               editor
                 ?.chain()
@@ -1679,7 +2094,7 @@ export function DocumentEditor({
           <button
             className="rounded-md border border-border bg-panel px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
             type="button"
-            disabled={!canEdit}
+            disabled={!canTypeInEditor}
             onClick={() => editor?.chain().focus().undo().run()}
           >
             Undo
@@ -1687,7 +2102,7 @@ export function DocumentEditor({
           <button
             className="rounded-md border border-border bg-panel px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
             type="button"
-            disabled={!canEdit}
+            disabled={!canTypeInEditor}
             onClick={() => editor?.chain().focus().redo().run()}
           >
             Redo

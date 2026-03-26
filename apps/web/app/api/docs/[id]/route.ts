@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 import { db, Prisma } from "@repo/db";
+import {
+  canEditDocument,
+  emptyDocContent,
+  getDocumentAccess,
+  toDocContentFromText,
+} from "../../../../lib/document-access";
 import { getCurrentUser } from "../../../../lib/current-user";
 
 type RouteContext = {
@@ -22,27 +28,14 @@ const normalizeTitle = (title: unknown) => {
 
 const normalizeContent = (content: unknown): Prisma.InputJsonValue => {
   if (typeof content === "string") {
-    return {
-      type: "doc",
-      content: content.trim()
-        ? [
-            {
-              type: "paragraph",
-              content: [{ type: "text", text: content.trim() }],
-            },
-          ]
-        : [{ type: "paragraph" }],
-    } satisfies Prisma.InputJsonValue;
+    return toDocContentFromText(content);
   }
 
   if (content && typeof content === "object") {
     return content as Prisma.InputJsonValue;
   }
 
-  return {
-    type: "doc",
-    content: [{ type: "paragraph" }],
-  } satisfies Prisma.InputJsonValue;
+  return emptyDocContent;
 };
 
 const readJsonBody = async <T>(request: Request): Promise<T | null> => {
@@ -93,28 +86,12 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   const body = await readJsonBody<UpdateDocInput>(request);
 
-  const editorAccess = await db.document.findFirst({
-    where: {
-      id,
-      OR: [
-        { ownerId: user.id },
-        {
-          members: {
-            some: {
-              userId: user.id,
-              role: { in: ["OWNER", "EDITOR"] },
-            },
-          },
-        },
-      ],
-      isArchived: false,
-    },
-    select: {
-      id: true,
-    },
+  const access = await getDocumentAccess({
+    documentId: id,
+    userId: user.id,
   });
 
-  if (!editorAccess) {
+  if (!access || !canEditDocument(access.role)) {
     return NextResponse.json({ error: "No edit access" }, { status: 403 });
   }
 

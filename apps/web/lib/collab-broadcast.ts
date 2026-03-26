@@ -1,10 +1,16 @@
 import { SignJWT } from "jose";
 
 type CommentEventAction = "created" | "replied" | "resolved";
+type SuggestionEventAction = "created" | "reviewed";
 
 type CommentEventPayload = {
   action: CommentEventAction;
   threadId: string;
+};
+
+type SuggestionEventPayload = {
+  action: SuggestionEventAction;
+  suggestionId: string;
 };
 
 const getCollabSecret = () => {
@@ -56,9 +62,10 @@ const createInternalToken = async (documentId: string) => {
     .sign(secret);
 };
 
-export const broadcastCommentEvent = async (
+const broadcastCollabEvent = async (
   documentId: string,
-  event: CommentEventPayload,
+  channel: "comments" | "suggestions",
+  event: Record<string, unknown>,
 ) => {
   const token = await createInternalToken(documentId);
 
@@ -78,7 +85,7 @@ export const broadcastCommentEvent = async (
       body: JSON.stringify({
         documentId,
         event: {
-          channel: "comments",
+          channel,
           ...event,
           at: new Date().toISOString(),
         },
@@ -88,4 +95,18 @@ export const broadcastCommentEvent = async (
   } catch {
     // Ignore transient broadcast failures. REST response still succeeds.
   }
+};
+
+export const broadcastCommentEvent = async (
+  documentId: string,
+  event: CommentEventPayload,
+) => {
+  await broadcastCollabEvent(documentId, "comments", event);
+};
+
+export const broadcastSuggestionEvent = async (
+  documentId: string,
+  event: SuggestionEventPayload,
+) => {
+  await broadcastCollabEvent(documentId, "suggestions", event);
 };

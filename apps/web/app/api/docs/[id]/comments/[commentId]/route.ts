@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { db } from "@repo/db";
 import { broadcastCommentEvent } from "../../../../../../lib/collab-broadcast";
+import {
+  canCommentOnDocument,
+  getDocumentAccess,
+} from "../../../../../../lib/document-access";
 import { getCurrentUser } from "../../../../../../lib/current-user";
 
 type RouteContext = {
@@ -19,12 +23,6 @@ const readJsonBody = async <T>(request: Request): Promise<T | null> => {
   }
 };
 
-const canViewWhere = (documentId: string, userId: string) => ({
-  id: documentId,
-  isArchived: false,
-  OR: [{ ownerId: userId }, { members: { some: { userId } } }],
-});
-
 export async function PATCH(
   request: Request,
   context: RouteContext,
@@ -37,35 +35,13 @@ export async function PATCH(
 
   const { id, commentId } = await context.params;
 
-  const document = await db.document.findFirst({
-    where: canViewWhere(id, user.id),
-    select: {
-      id: true,
-      ownerId: true,
-      members: {
-        where: {
-          userId: user.id,
-        },
-        select: {
-          role: true,
-        },
-        take: 1,
-      },
-    },
-  });
+  const access = await getDocumentAccess({ documentId: id, userId: user.id });
 
-  if (!document) {
+  if (!access) {
     return NextResponse.json({ error: "Document not found" }, { status: 404 });
   }
 
-  const memberRole = document.members[0]?.role;
-  const canComment =
-    document.ownerId === user.id ||
-    memberRole === "OWNER" ||
-    memberRole === "EDITOR" ||
-    memberRole === "COMMENTER";
-
-  if (!canComment) {
+  if (!canCommentOnDocument(access.role)) {
     return NextResponse.json({ error: "No comment access" }, { status: 403 });
   }
 

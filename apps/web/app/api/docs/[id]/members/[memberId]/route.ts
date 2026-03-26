@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@repo/db";
+import {
+  canManageDocumentMembers,
+  getDocumentAccess,
+} from "../../../../../../lib/document-access";
 import { getCurrentUser } from "../../../../../../lib/current-user";
 
 type RouteContext = {
@@ -38,19 +42,6 @@ const readJsonBody = async <T>(request: Request): Promise<T | null> => {
   }
 };
 
-const ensureOwnerAccess = async (documentId: string, userId: string) => {
-  return db.document.findFirst({
-    where: {
-      id: documentId,
-      ownerId: userId,
-      isArchived: false,
-    },
-    select: {
-      id: true,
-    },
-  });
-};
-
 export async function PATCH(
   request: Request,
   context: RouteContext,
@@ -72,10 +63,14 @@ export async function PATCH(
     );
   }
 
-  const ownerAccess = await ensureOwnerAccess(id, user.id);
+  const access = await getDocumentAccess({ documentId: id, userId: user.id });
 
-  if (!ownerAccess) {
+  if (!access) {
     return NextResponse.json({ error: "Document not found" }, { status: 404 });
+  }
+
+  if (!canManageDocumentMembers(access.role)) {
+    return NextResponse.json({ error: "No member access" }, { status: 403 });
   }
 
   const member = await db.documentMember.findFirst({
@@ -127,10 +122,14 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const ownerAccess = await ensureOwnerAccess(id, user.id);
+  const access = await getDocumentAccess({ documentId: id, userId: user.id });
 
-  if (!ownerAccess) {
+  if (!access) {
     return NextResponse.json({ error: "Document not found" }, { status: 404 });
+  }
+
+  if (!canManageDocumentMembers(access.role)) {
+    return NextResponse.json({ error: "No member access" }, { status: 403 });
   }
 
   const member = await db.documentMember.findFirst({
