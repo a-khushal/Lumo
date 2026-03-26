@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@repo/db";
+import { z } from "zod";
 import {
   canManageDocumentMembers,
   getDocumentAccess,
@@ -10,12 +11,12 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
-type InviteMemberInput = {
-  email?: unknown;
-  role?: unknown;
-};
-
 const ALLOWED_MEMBER_ROLES = ["EDITOR", "COMMENTER", "VIEWER"] as const;
+
+const inviteMemberSchema = z.object({
+  email: z.string().trim().email().max(320),
+  role: z.enum(ALLOWED_MEMBER_ROLES).optional(),
+});
 
 const normalizeEmail = (email: unknown) => {
   if (typeof email !== "string") {
@@ -153,18 +154,20 @@ export async function POST(
     return NextResponse.json({ error: "No member access" }, { status: 403 });
   }
 
-  const body = await readJsonBody<InviteMemberInput>(request);
-  const email = normalizeEmail(body?.email);
-  const role = normalizeRole(body?.role);
+  const body = await readJsonBody<unknown>(request);
+  const parsedBody = inviteMemberSchema.safeParse(body ?? {});
 
-  if (!email) {
+  if (!parsedBody.success) {
     return NextResponse.json(
-      { error: "Valid email is required" },
+      { error: "Invalid request body", details: parsedBody.error.flatten() },
       { status: 400 },
     );
   }
 
-  if (!role) {
+  const email = normalizeEmail(parsedBody.data.email);
+  const role = normalizeRole(parsedBody.data.role);
+
+  if (!email || !role) {
     return NextResponse.json(
       { error: "Role must be one of EDITOR, COMMENTER, VIEWER" },
       { status: 400 },

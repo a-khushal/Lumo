@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@repo/db";
+import { z } from "zod";
 import { broadcastCommentEvent } from "../../../../../../../lib/collab-broadcast";
 import {
   canCommentOnDocument,
@@ -11,9 +12,9 @@ type RouteContext = {
   params: Promise<{ id: string; commentId: string }>;
 };
 
-type CreateReplyInput = {
-  content?: unknown;
-};
+const createReplySchema = z.object({
+  content: z.string().trim().min(1).max(2000),
+});
 
 const readJsonBody = async <T>(request: Request): Promise<T | null> => {
   try {
@@ -59,8 +60,17 @@ export async function POST(
     return NextResponse.json({ error: "No comment access" }, { status: 403 });
   }
 
-  const body = await readJsonBody<CreateReplyInput>(request);
-  const content = normalizeCommentContent(body?.content);
+  const body = await readJsonBody<unknown>(request);
+  const parsedBody = createReplySchema.safeParse(body ?? {});
+
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      { error: "Invalid request body", details: parsedBody.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const content = normalizeCommentContent(parsedBody.data.content);
 
   if (!content) {
     return NextResponse.json(

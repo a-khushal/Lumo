@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, type Prisma } from "@repo/db";
+import { z } from "zod";
 import { broadcastSuggestionEvent } from "../../../../../lib/collab-broadcast";
 import {
   canCommentOnDocument,
@@ -12,11 +13,11 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
-type CreateSuggestionInput = {
-  proposedTitle?: unknown;
-  proposedContent?: unknown;
-  proposedText?: unknown;
-};
+const createSuggestionSchema = z.object({
+  proposedTitle: z.string().trim().max(120).optional().nullable(),
+  proposedContent: z.record(z.string(), z.unknown()).optional().nullable(),
+  proposedText: z.string().trim().max(20000).optional().nullable(),
+});
 
 const readJsonBody = async <T>(request: Request): Promise<T | null> => {
   try {
@@ -125,13 +126,23 @@ export async function POST(
     );
   }
 
-  const body = await readJsonBody<CreateSuggestionInput>(request);
+  const body = await readJsonBody<unknown>(request);
+  const parsedBody = createSuggestionSchema.safeParse(body ?? {});
+
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      { error: "Invalid request body", details: parsedBody.error.flatten() },
+      { status: 400 },
+    );
+  }
+
   const hasCustomContent =
-    (typeof body?.proposedText === "string" &&
-      body.proposedText.trim().length > 0) ||
-    (body?.proposedContent !== null &&
-      typeof body?.proposedContent === "object");
-  const proposedTitle = normalizeTitle(body?.proposedTitle);
+    (typeof parsedBody.data.proposedText === "string" &&
+      parsedBody.data.proposedText.trim().length > 0) ||
+    (parsedBody.data.proposedContent !== null &&
+      parsedBody.data.proposedContent !== undefined &&
+      typeof parsedBody.data.proposedContent === "object");
+  const proposedTitle = normalizeTitle(parsedBody.data.proposedTitle);
 
   if (!proposedTitle && !hasCustomContent) {
     return NextResponse.json(
@@ -146,8 +157,8 @@ export async function POST(
       suggestedById: user.id,
       proposedTitle,
       proposedContent: normalizeSuggestedContent(
-        body?.proposedContent,
-        body?.proposedText,
+        parsedBody.data.proposedContent,
+        parsedBody.data.proposedText,
       ),
     },
     select: {

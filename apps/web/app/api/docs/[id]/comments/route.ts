@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@repo/db";
+import { z } from "zod";
 import { broadcastCommentEvent } from "../../../../../lib/collab-broadcast";
 import {
   canCommentOnDocument,
@@ -11,12 +12,21 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
-type CreateCommentInput = {
-  content?: unknown;
-  quotedText?: unknown;
-  selectionFrom?: unknown;
-  selectionTo?: unknown;
-};
+const createCommentSchema = z
+  .object({
+    content: z.string().trim().min(1).max(2000),
+    quotedText: z.string().trim().max(300).optional(),
+    selectionFrom: z.number().int().nonnegative().optional(),
+    selectionTo: z.number().int().nonnegative().optional(),
+  })
+  .refine(
+    (value) =>
+      (value.selectionFrom === undefined && value.selectionTo === undefined) ||
+      (value.selectionFrom !== undefined && value.selectionTo !== undefined),
+    {
+      message: "selectionFrom and selectionTo must both be provided",
+    },
+  );
 
 const readJsonBody = async <T>(request: Request): Promise<T | null> => {
   try {
@@ -188,8 +198,17 @@ export async function POST(
     return NextResponse.json({ error: "No comment access" }, { status: 403 });
   }
 
-  const body = await readJsonBody<CreateCommentInput>(request);
-  const content = normalizeCommentContent(body?.content);
+  const body = await readJsonBody<unknown>(request);
+  const parsedBody = createCommentSchema.safeParse(body ?? {});
+
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      { error: "Invalid request body", details: parsedBody.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const content = normalizeCommentContent(parsedBody.data.content);
 
   if (!content) {
     return NextResponse.json(
@@ -198,15 +217,17 @@ export async function POST(
     );
   }
 
-  const selectionFrom = normalizeSelectionPosition(body?.selectionFrom);
-  const selectionTo = normalizeSelectionPosition(body?.selectionTo);
+  const selectionFrom = normalizeSelectionPosition(
+    parsedBody.data.selectionFrom,
+  );
+  const selectionTo = normalizeSelectionPosition(parsedBody.data.selectionTo);
 
   const comment = await db.documentComment.create({
     data: {
       documentId: id,
       authorId: user.id,
       content,
-      quotedText: normalizeQuotedText(body?.quotedText),
+      quotedText: normalizeQuotedText(parsedBody.data.quotedText),
       selectionFrom,
       selectionTo,
     },

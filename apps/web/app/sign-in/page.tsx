@@ -5,20 +5,35 @@ import { getSession, signInWithEmail } from "../../lib/auth";
 export const dynamic = "force-dynamic";
 
 type SignInPageProps = {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; callbackUrl?: string }>;
+};
+
+const resolveCallbackUrl = (value: unknown) => {
+  if (typeof value !== "string") {
+    return "/";
+  }
+
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue.startsWith("/")) {
+    return "/";
+  }
+
+  return trimmedValue;
 };
 
 const loginWithEmail = async (formData: FormData) => {
   "use server";
 
   const email = formData.get("email");
+  const callbackUrl = resolveCallbackUrl(formData.get("callbackUrl"));
 
   if (typeof email !== "string" || email.trim().length === 0) {
     redirect("/sign-in?error=Missing%20email");
   }
 
   try {
-    await signInWithEmail(email, "/");
+    await signInWithEmail(email, callbackUrl);
   } catch (error) {
     if (error instanceof AuthError) {
       redirect(`/sign-in?error=${encodeURIComponent(error.type)}`);
@@ -36,6 +51,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   }
 
   const params = await searchParams;
+  const callbackUrl = resolveCallbackUrl(params.callbackUrl);
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-xl items-center px-5 py-12 sm:px-8">
@@ -55,6 +71,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
         ) : null}
 
         <form action={loginWithEmail} className="mt-5 grid gap-3">
+          <input type="hidden" name="callbackUrl" value={callbackUrl} />
           <label className="grid gap-1.5 text-sm text-ink" htmlFor="email">
             Email
             <input

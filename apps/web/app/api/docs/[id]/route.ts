@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, Prisma } from "@repo/db";
+import { z } from "zod";
 import {
   canEditDocument,
   emptyDocContent,
@@ -12,10 +13,18 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
-type UpdateDocInput = {
-  title?: unknown;
-  content?: unknown;
-};
+const updateDocSchema = z
+  .object({
+    title: z.string().trim().max(120).optional(),
+    content: z.unknown().optional(),
+  })
+  .refine(
+    (value: { title?: string; content?: unknown }) =>
+      value.title !== undefined || value.content !== undefined,
+    {
+      message: "At least one of title or content is required",
+    },
+  );
 
 const normalizeTitle = (title: unknown) => {
   if (typeof title !== "string") {
@@ -84,7 +93,15 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await readJsonBody<UpdateDocInput>(request);
+  const body = await readJsonBody<unknown>(request);
+  const parsedBody = updateDocSchema.safeParse(body ?? {});
+
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      { error: "Invalid request body", details: parsedBody.error.flatten() },
+      { status: 400 },
+    );
+  }
 
   const access = await getDocumentAccess({
     documentId: id,
@@ -96,14 +113,14 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const updateData: Prisma.DocumentUpdateInput = {};
-  const nextTitle = normalizeTitle(body?.title);
+  const nextTitle = normalizeTitle(parsedBody.data.title);
 
   if (nextTitle !== null) {
     updateData.title = nextTitle;
   }
 
-  if (body && "content" in body) {
-    updateData.content = normalizeContent(body.content);
+  if (parsedBody.data.content !== undefined) {
+    updateData.content = normalizeContent(parsedBody.data.content);
   }
 
   if (Object.keys(updateData).length === 0) {

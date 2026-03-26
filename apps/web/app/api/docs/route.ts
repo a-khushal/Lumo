@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { db, Prisma } from "@repo/db";
+import { z } from "zod";
 import { getCurrentUser } from "../../../lib/current-user";
 
-type CreateDocInput = {
-  title?: unknown;
-};
+const createDocSchema = z.object({
+  title: z.string().trim().max(120).optional(),
+});
 
 const readJsonBody = async <T>(request: Request): Promise<T | null> => {
   try {
@@ -94,12 +95,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await readJsonBody<CreateDocInput>(request);
+  const body = await readJsonBody<unknown>(request);
+  const parsedBody = createDocSchema.safeParse(body ?? {});
+
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      { error: "Invalid request body", details: parsedBody.error.flatten() },
+      { status: 400 },
+    );
+  }
 
   const document = await db.document.create({
     data: {
       ownerId: user.id,
-      title: normalizeTitle(body?.title),
+      title: normalizeTitle(parsedBody.data.title),
       content: {
         type: "doc",
         content: [{ type: "paragraph" }],

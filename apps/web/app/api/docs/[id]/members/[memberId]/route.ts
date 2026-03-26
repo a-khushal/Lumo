@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@repo/db";
+import { z } from "zod";
 import {
   canManageDocumentMembers,
   getDocumentAccess,
@@ -10,11 +11,11 @@ type RouteContext = {
   params: Promise<{ id: string; memberId: string }>;
 };
 
-type UpdateMemberInput = {
-  role?: unknown;
-};
-
 const ALLOWED_MEMBER_ROLES = ["EDITOR", "COMMENTER", "VIEWER"] as const;
+
+const updateMemberSchema = z.object({
+  role: z.enum(ALLOWED_MEMBER_ROLES),
+});
 
 const normalizeRole = (role: unknown) => {
   if (typeof role !== "string") {
@@ -53,8 +54,17 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await readJsonBody<UpdateMemberInput>(request);
-  const role = normalizeRole(body?.role);
+  const body = await readJsonBody<unknown>(request);
+  const parsedBody = updateMemberSchema.safeParse(body ?? {});
+
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      { error: "Invalid request body", details: parsedBody.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const role = normalizeRole(parsedBody.data.role);
 
   if (!role) {
     return NextResponse.json(

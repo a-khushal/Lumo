@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@repo/db";
+import { z } from "zod";
 import { broadcastCommentEvent } from "../../../../../../lib/collab-broadcast";
 import {
   canCommentOnDocument,
@@ -11,9 +12,9 @@ type RouteContext = {
   params: Promise<{ id: string; commentId: string }>;
 };
 
-type UpdateCommentInput = {
-  resolved?: unknown;
-};
+const updateCommentSchema = z.object({
+  resolved: z.boolean(),
+});
 
 const readJsonBody = async <T>(request: Request): Promise<T | null> => {
   try {
@@ -45,11 +46,12 @@ export async function PATCH(
     return NextResponse.json({ error: "No comment access" }, { status: 403 });
   }
 
-  const body = await readJsonBody<UpdateCommentInput>(request);
+  const body = await readJsonBody<unknown>(request);
+  const parsedBody = updateCommentSchema.safeParse(body ?? {});
 
-  if (typeof body?.resolved !== "boolean") {
+  if (!parsedBody.success) {
     return NextResponse.json(
-      { error: "resolved boolean is required" },
+      { error: "Invalid request body", details: parsedBody.error.flatten() },
       { status: 400 },
     );
   }
@@ -76,9 +78,9 @@ export async function PATCH(
       id: threadId,
     },
     data: {
-      isResolved: body.resolved,
-      resolvedAt: body.resolved ? new Date() : null,
-      resolvedById: body.resolved ? user.id : null,
+      isResolved: parsedBody.data.resolved,
+      resolvedAt: parsedBody.data.resolved ? new Date() : null,
+      resolvedById: parsedBody.data.resolved ? user.id : null,
     },
     select: {
       id: true,

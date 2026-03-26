@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, type Prisma } from "@repo/db";
+import { z } from "zod";
 import { broadcastSuggestionEvent } from "../../../../../../lib/collab-broadcast";
 import {
   canReviewSuggestions,
@@ -11,9 +12,9 @@ type RouteContext = {
   params: Promise<{ id: string; suggestionId: string }>;
 };
 
-type ReviewSuggestionInput = {
-  action?: unknown;
-};
+const reviewSuggestionSchema = z.object({
+  action: z.enum(["accept", "reject"]),
+});
 
 const readJsonBody = async <T>(request: Request): Promise<T | null> => {
   try {
@@ -47,15 +48,17 @@ export async function PATCH(
     );
   }
 
-  const body = await readJsonBody<ReviewSuggestionInput>(request);
-  const action = typeof body?.action === "string" ? body.action : null;
+  const body = await readJsonBody<unknown>(request);
+  const parsedBody = reviewSuggestionSchema.safeParse(body ?? {});
 
-  if (action !== "accept" && action !== "reject") {
+  if (!parsedBody.success) {
     return NextResponse.json(
-      { error: "action must be accept or reject" },
+      { error: "Invalid request body", details: parsedBody.error.flatten() },
       { status: 400 },
     );
   }
+
+  const action = parsedBody.data.action;
 
   const suggestion = await db.documentSuggestion.findFirst({
     where: {
