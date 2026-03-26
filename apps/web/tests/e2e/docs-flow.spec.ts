@@ -12,7 +12,19 @@ const signIn = async (page: Page) => {
 };
 
 const createDocument = async (page: Page) => {
-  await page.getByRole("button", { name: "New document" }).click();
+  const response = await page.request.post("/api/docs", {
+    data: {
+      title: "E2E Document",
+    },
+  });
+
+  expect(response.ok()).toBeTruthy();
+
+  const body = (await response.json()) as {
+    document: { id: string };
+  };
+
+  await page.goto(`/docs/${body.document.id}`);
   await expect(page).toHaveURL(/\/docs\//);
 };
 
@@ -27,7 +39,7 @@ test("core docs flow supports comments and suggestions", async ({ page }) => {
   await page.getByRole("button", { name: "Post comment" }).click();
   await expect(page.getByText("Looks good")).toBeVisible();
 
-  await page.getByRole("button", { name: "Suggest" }).click();
+  await page.getByRole("button", { name: "Suggest", exact: true }).click();
   await page.getByRole("button", { name: "Suggestions" }).click();
   await page
     .getByPlaceholder("Describe the suggested text update")

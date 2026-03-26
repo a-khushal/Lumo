@@ -227,6 +227,44 @@ const normalizeEditorContent = (value: unknown): EditorDoc => {
   return emptyDoc;
 };
 
+const extractTextFragments = (value: unknown, fragments: string[]) => {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  const node = value as {
+    type?: unknown;
+    text?: unknown;
+    content?: unknown;
+  };
+
+  if (node.type === "text" && typeof node.text === "string") {
+    fragments.push(node.text);
+  }
+
+  if (Array.isArray(node.content)) {
+    node.content.forEach((child) => extractTextFragments(child, fragments));
+  }
+};
+
+const toPreviewText = (value: unknown) => {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  const fragments: string[] = [];
+  extractTextFragments(value, fragments);
+  return fragments.join(" ").replace(/\s+/g, " ").trim();
+};
+
+const shortenText = (value: string, maxLength = 180) => {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength).trimEnd()}...`;
+};
+
 const collabUrl =
   process.env.NEXT_PUBLIC_COLLAB_URL?.trim() || "ws://127.0.0.1:1234";
 
@@ -570,6 +608,7 @@ export function DocumentEditor({
         }),
         CommentAnchorExtension,
       ],
+      immediatelyRender: false,
       editable: canTypeInEditor,
       content: startingContent,
       editorProps: {
@@ -768,6 +807,10 @@ export function DocumentEditor({
     return suggestions.filter((suggestion) => suggestion.status === "OPEN")
       .length;
   }, [suggestions]);
+
+  const currentTextPreview = useMemo(() => {
+    return shortenText(toPreviewText(content) || "(empty)");
+  }, [content]);
 
   useEffect(() => {
     if (!isShareOpen) {
@@ -1607,6 +1650,16 @@ export function DocumentEditor({
           <ul className="grid gap-2">
             {suggestions.map((suggestion) => {
               const isBusy = suggestionActionId === suggestion.id;
+              const proposedTitleValue =
+                suggestion.proposedTitle?.trim() || null;
+              const currentTitleValue = title.trim() || "Untitled document";
+              const titleChanged =
+                proposedTitleValue !== null &&
+                proposedTitleValue !== currentTitleValue;
+              const proposedTextPreview = shortenText(
+                toPreviewText(suggestion.proposedContent) || "(empty)",
+              );
+              const textChanged = proposedTextPreview !== currentTextPreview;
 
               return (
                 <li
@@ -1630,11 +1683,39 @@ export function DocumentEditor({
                     </span>
                   </div>
 
-                  {suggestion.proposedTitle ? (
-                    <p className="text-sm text-ink">
-                      <span className="font-semibold">Title:</span>{" "}
-                      {suggestion.proposedTitle}
-                    </p>
+                  {titleChanged ? (
+                    <div className="mt-2 rounded-lg border border-border bg-panel p-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                        Title diff
+                      </p>
+                      <p className="text-sm text-muted line-through">
+                        {currentTitleValue}
+                      </p>
+                      <p className="text-sm font-medium text-accent-strong">
+                        {proposedTitleValue}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {textChanged ? (
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <div className="rounded-lg border border-border bg-panel p-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                          Current text
+                        </p>
+                        <p className="text-sm text-muted">
+                          {currentTextPreview}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-accent-strong">
+                          Proposed text
+                        </p>
+                        <p className="text-sm text-accent-strong">
+                          {proposedTextPreview}
+                        </p>
+                      </div>
+                    </div>
                   ) : null}
 
                   <p className="text-xs text-muted">
