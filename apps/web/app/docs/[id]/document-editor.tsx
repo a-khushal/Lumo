@@ -126,6 +126,11 @@ type ApiError = {
 type InviteStatus = "idle" | "submitting" | "error" | "success";
 type EditorDoc = Record<string, unknown>;
 type CollabStatus = "connecting" | "connected" | "disconnected";
+type CommentsCollabEvent = {
+  channel?: unknown;
+  action?: unknown;
+  threadId?: unknown;
+};
 
 const emptyDoc: EditorDoc = {
   type: "doc",
@@ -284,6 +289,8 @@ export function DocumentEditor({
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isCommentsOpen, setIsCommentsOpen] = useState(false);
+  const [hasUnreadCommentActivity, setHasUnreadCommentActivity] =
+    useState(false);
   const [isMembersLoading, setIsMembersLoading] = useState(false);
   const [isSnapshotsLoading, setIsSnapshotsLoading] = useState(false);
   const [isCommentsLoading, setIsCommentsLoading] = useState(false);
@@ -298,6 +305,7 @@ export function DocumentEditor({
   const [commentThreads, setCommentThreads] = useState<CommentThreadResponse[]>(
     [],
   );
+  const [commentsRefreshNonce, setCommentsRefreshNonce] = useState(0);
   const [activeCommentThreadId, setActiveCommentThreadId] = useState<
     string | null
   >(null);
@@ -437,8 +445,33 @@ export function DocumentEditor({
       setCollaborators(Array.from(nextCollaborators.values()));
     };
 
+    const handleStateless = (event: { payload?: unknown }) => {
+      if (typeof event?.payload !== "string") {
+        return;
+      }
+
+      let payload: CommentsCollabEvent | null = null;
+
+      try {
+        payload = JSON.parse(event.payload) as CommentsCollabEvent;
+      } catch {
+        return;
+      }
+
+      if (!payload || payload.channel !== "comments") {
+        return;
+      }
+
+      if (isCommentsOpen) {
+        setCommentsRefreshNonce((prev) => prev + 1);
+      } else {
+        setHasUnreadCommentActivity(true);
+      }
+    };
+
     collaborationState.provider.on("status", handleStatus);
     collaborationState.provider.awareness?.on("change", handleAwarenessChange);
+    collaborationState.provider.on("stateless", handleStateless);
     handleAwarenessChange();
 
     return () => {
@@ -446,11 +479,18 @@ export function DocumentEditor({
         "change",
         handleAwarenessChange,
       );
+      collaborationState.provider.off("stateless", handleStateless);
       collaborationState.provider.off("status", handleStatus);
       collaborationState.provider.destroy();
       collaborationState.document.destroy();
     };
-  }, [collaborationState, currentUserEmail, currentUserId, currentUserName]);
+  }, [
+    collaborationState,
+    currentUserEmail,
+    currentUserId,
+    currentUserName,
+    isCommentsOpen,
+  ]);
 
   const editor = useEditor(
     {
@@ -585,6 +625,14 @@ export function DocumentEditor({
     }
   }, [documentId]);
 
+  useEffect(() => {
+    if (!isCommentsOpen || commentsRefreshNonce === 0) {
+      return;
+    }
+
+    void loadComments();
+  }, [commentsRefreshNonce, isCommentsOpen, loadComments]);
+
   const statusLabel = useMemo(() => {
     if (!canEdit) {
       return `Read-only (${currentUserRole})`;
@@ -623,24 +671,7 @@ export function DocumentEditor({
     }
 
     void loadComments();
-  }, [isCommentsOpen, loadComments]);
-
-  useEffect(() => {
-    if (!isCommentsOpen) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState !== "visible") {
-        return;
-      }
-
-      void loadComments();
-    }, 3000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
+    setHasUnreadCommentActivity(false);
   }, [isCommentsOpen, loadComments]);
 
   useEffect(() => {
@@ -1110,6 +1141,9 @@ export function DocumentEditor({
               onClick={() => setIsCommentsOpen((value) => !value)}
             >
               {isCommentsOpen ? "Close comments" : "Comments"}
+              {!isCommentsOpen && hasUnreadCommentActivity ? (
+                <span className="ml-2 inline-block h-2 w-2 rounded-full bg-amber-500" />
+              ) : null}
             </button>
             <button
               className="rounded-full border border-border bg-panel px-4 py-2 text-sm font-medium text-ink transition hover:bg-slate-50"

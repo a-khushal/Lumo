@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@repo/db";
+import { broadcastCommentEvent } from "../../../../../../lib/collab-broadcast";
 import { getCurrentUser } from "../../../../../../lib/current-user";
 
 type RouteContext = {
@@ -116,6 +117,11 @@ export async function PATCH(
       },
       updatedAt: true,
     },
+  });
+
+  await broadcastCommentEvent(id, {
+    action: "resolved",
+    threadId,
   });
 
   return NextResponse.json({ comment: updatedComment });

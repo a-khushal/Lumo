@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@repo/db";
+import { broadcastCommentEvent } from "../../../../../../../lib/collab-broadcast";
 import { getCurrentUser } from "../../../../../../../lib/current-user";
 
 type RouteContext = {
@@ -146,6 +147,11 @@ export async function POST(
       },
     }),
   ]);
+
+  await broadcastCommentEvent(id, {
+    action: "replied",
+    threadId,
+  });
 
   return NextResponse.json({ reply }, { status: 201 });
 }

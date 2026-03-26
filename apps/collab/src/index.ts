@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { config as loadEnv } from "dotenv";
 import {
@@ -46,6 +47,15 @@ type CollabPayload = JWTPayload & {
   doc?: unknown;
 };
 
+type InternalPayload = JWTPayload & {
+  doc?: unknown;
+};
+
+type BroadcastRequestBody = {
+  documentId?: unknown;
+  event?: unknown;
+};
+
 const verifyCollabToken = async (token: string, documentId: string) => {
   const { payload } = await jwtVerify<CollabPayload>(token, getCollabSecret(), {
     issuer: "docs-web",
@@ -63,6 +73,102 @@ const verifyCollabToken = async (token: string, documentId: string) => {
   }
 
   return userId;
+};
+
+const verifyInternalToken = async (token: string, documentId: string) => {
+  const { payload } = await jwtVerify<InternalPayload>(
+    token,
+    getCollabSecret(),
+    {
+      issuer: "docs-web",
+      audience: "docs-collab-internal",
+    },
+  );
+
+  if (payload.doc !== documentId) {
+    throw new Error("Unauthorized");
+  }
+};
+
+const readJsonBody = async (request: IncomingMessage) => {
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of request) {
+    chunks.push(
+      typeof chunk === "string" ? Buffer.from(chunk) : Buffer.from(chunk),
+    );
+  }
+
+  if (chunks.length === 0) {
+    return null;
+  }
+
+  const raw = Buffer.concat(chunks).toString("utf8");
+
+  try {
+    return JSON.parse(raw) as BroadcastRequestBody;
+  } catch {
+    return null;
+  }
+};
+
+const sendJson = (
+  response: ServerResponse,
+  statusCode: number,
+  payload: Record<string, unknown>,
+) => {
+  response.statusCode = statusCode;
+  response.setHeader("content-type", "application/json");
+  response.end(JSON.stringify(payload));
+};
+
+const handleInternalBroadcastRequest = async (
+  request: IncomingMessage,
+  response: ServerResponse,
+  instance: {
+    documents: Map<string, { broadcastStateless: (payload: string) => void }>;
+  },
+) => {
+  const body = await readJsonBody(request);
+  const documentId =
+    body && typeof body.documentId === "string" ? body.documentId : null;
+
+  if (!documentId) {
+    sendJson(response, 400, { error: "documentId is required" });
+    return;
+  }
+
+  const authHeader = request.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    sendJson(response, 401, { error: "Unauthorized" });
+    return;
+  }
+
+  const token = authHeader.slice("Bearer ".length).trim();
+
+  try {
+    await verifyInternalToken(token, documentId);
+  } catch {
+    sendJson(response, 401, { error: "Unauthorized" });
+    return;
+  }
+
+  if (!body?.event || typeof body.event !== "object") {
+    sendJson(response, 400, { error: "event is required" });
+    return;
+  }
+
+  const document = instance.documents.get(documentId);
+
+  if (!document) {
+    sendJson(response, 202, { ok: true, delivered: false });
+    return;
+  }
+
+  document.broadcastStateless(JSON.stringify(body.event));
+
+  sendJson(response, 202, { ok: true, delivered: true });
 };
 
 const emptyDocument: Prisma.InputJsonValue = {
@@ -118,6 +224,19 @@ const server = new Server({
   port: COLLAB_PORT,
   debounce: STORE_DEBOUNCE_MS,
   maxDebounce: STORE_MAX_DEBOUNCE_MS,
+  async onRequest({ request, response, instance }) {
+    const requestUrl = new URL(request.url ?? "/", "http://localhost");
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/internal/broadcast"
+    ) {
+      await handleInternalBroadcastRequest(request, response, instance);
+      return;
+    }
+
+    sendJson(response, 404, { error: "Not found" });
+  },
   async onAuthenticate({
     token,
     documentName,
