@@ -153,6 +153,98 @@ const createFolder = async (formData: FormData) => {
   }
 };
 
+const renameFolder = async (formData: FormData) => {
+  "use server";
+
+  const user = await requireCurrentUser();
+  const folderId = normalizeFolderId(formData.get("folderId"));
+  const folderName = normalizeFolderName(formData.get("name"));
+  const scope = sanitizeScopeValue(formData.get("scope"));
+
+  if (!folderId || !folderName) {
+    redirect(toScopeQuery(scope));
+  }
+
+  const folder = await db.documentFolder.findFirst({
+    where: {
+      id: folderId,
+      ownerId: user.id,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!folder) {
+    redirect(toScopeQuery(scope));
+  }
+
+  try {
+    await db.documentFolder.update({
+      where: {
+        id: folder.id,
+      },
+      data: {
+        name: folderName,
+      },
+    });
+  } catch {
+    redirect(toScopeQuery(scope));
+  }
+
+  redirect(toScopeQuery(scope));
+};
+
+const deleteFolder = async (formData: FormData) => {
+  "use server";
+
+  const user = await requireCurrentUser();
+  const folderId = normalizeFolderId(formData.get("folderId"));
+  const scope = sanitizeScopeValue(formData.get("scope"));
+
+  if (!folderId) {
+    redirect(toScopeQuery(scope));
+  }
+
+  const folder = await db.documentFolder.findFirst({
+    where: {
+      id: folderId,
+      ownerId: user.id,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!folder) {
+    redirect(toScopeQuery(scope));
+  }
+
+  await db.$transaction(async (tx) => {
+    await tx.document.updateMany({
+      where: {
+        ownerId: user.id,
+        folderId: folder.id,
+      },
+      data: {
+        folderId: null,
+      },
+    });
+
+    await tx.documentFolder.delete({
+      where: {
+        id: folder.id,
+      },
+    });
+  });
+
+  if (scope === `folder:${folder.id}`) {
+    redirect("/?scope=unfiled");
+  }
+
+  redirect(toScopeQuery(scope));
+};
+
 const moveDocument = async (formData: FormData) => {
   "use server";
 
@@ -512,6 +604,57 @@ export default async function Home({ searchParams }: HomePageProps) {
               </button>
             </form>
           </div>
+
+          {folders.length > 0 ? (
+            <div className="border-t border-border pt-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted">
+                Manage folders
+              </p>
+              <ul className="space-y-2">
+                {folders.map((folder) => (
+                  <li
+                    key={folder.id}
+                    className="rounded-lg border border-border bg-slate-50 p-2"
+                  >
+                    <form action={renameFolder} className="flex gap-2">
+                      <input type="hidden" name="folderId" value={folder.id} />
+                      <input type="hidden" name="scope" value={scopeValue} />
+                      <input
+                        className="w-full rounded-md border border-border bg-panel px-2 py-1.5 text-sm text-ink outline-none ring-accent/40 focus:ring-2"
+                        name="name"
+                        defaultValue={folder.name}
+                        maxLength={64}
+                        required
+                      />
+                      <button
+                        className="rounded-md border border-border bg-panel px-2 py-1.5 text-xs font-semibold text-ink transition hover:bg-slate-100"
+                        type="submit"
+                      >
+                        Rename
+                      </button>
+                    </form>
+
+                    <form
+                      action={deleteFolder}
+                      className="mt-2 flex justify-end"
+                    >
+                      <input type="hidden" name="folderId" value={folder.id} />
+                      <input type="hidden" name="scope" value={scopeValue} />
+                      <button
+                        className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                        type="submit"
+                      >
+                        Delete
+                      </button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-muted">
+                Deleting a folder keeps documents and moves them to Unfiled.
+              </p>
+            </div>
+          ) : null}
         </aside>
 
         <section className="overflow-hidden rounded-2xl border border-border bg-panel shadow-card">
