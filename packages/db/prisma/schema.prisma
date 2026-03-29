@@ -28,6 +28,7 @@ model User {
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
   documents         Document[]
+  folders           DocumentFolder[]
   memberships       DocumentMember[]
   createdSnaps      DocumentSnapshot[]
   authoredComments  DocumentComment[] @relation("CommentAuthor")
@@ -38,22 +39,39 @@ model User {
 }
 
 model Document {
-  id         String            @id @default(cuid())
-  title      String            @default("Untitled document")
-  content    Json
-  ownerId    String
-  isArchived Boolean           @default(false)
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
-  owner      User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  members    DocumentMember[]
-  snapshots  DocumentSnapshot[]
-  comments   DocumentComment[]
-  suggestions DocumentSuggestion[]
+  id           String            @id @default(cuid())
+  title        String            @default("Untitled document")
+  content      Json
+  ownerId      String
+  folderId     String?
+  isArchived   Boolean           @default(false)
+  archivedAt   DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  owner        User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  folder       DocumentFolder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  members      DocumentMember[]
+  snapshots    DocumentSnapshot[]
+  comments     DocumentComment[]
+  suggestions  DocumentSuggestion[]
   commentReads DocumentCommentRead[]
 
-  @@index([ownerId])
+  @@index([ownerId, isArchived, folderId, updatedAt])
+  @@index([folderId])
   @@index([updatedAt])
+}
+
+model DocumentFolder {
+  id        String     @id @default(cuid())
+  ownerId   String
+  name      String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  owner     User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  documents Document[]
+
+  @@unique([ownerId, name])
+  @@index([ownerId, updatedAt])
 }
 
 model DocumentMember {

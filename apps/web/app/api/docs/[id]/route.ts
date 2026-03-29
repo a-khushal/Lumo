@@ -18,12 +18,17 @@ const updateDocSchema = z
   .object({
     title: z.string().trim().max(120).optional(),
     content: z.unknown().optional(),
+    folderId: z.string().cuid().nullable().optional(),
+    isArchived: z.boolean().optional(),
   })
   .refine(
-    (value: { title?: string; content?: unknown }) =>
-      value.title !== undefined || value.content !== undefined,
+    (value) =>
+      value.title !== undefined ||
+      value.content !== undefined ||
+      value.folderId !== undefined ||
+      value.isArchived !== undefined,
     {
-      message: "At least one of title or content is required",
+      message: "At least one field is required",
     },
   );
 
@@ -83,11 +88,19 @@ export async function GET(_request: Request, context: RouteContext) {
       id: true,
       title: true,
       content: true,
+      folderId: true,
+      folder: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      isArchived: true,
+      archivedAt: true,
       updatedAt: true,
       createdAt: true,
     },
   });
-
   if (!document) {
     return NextResponse.json({ error: "Document not found" }, { status: 404 });
   }
@@ -131,6 +144,17 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "No edit access" }, { status: 403 });
   }
 
+  const isOrganizationUpdate =
+    parsedBody.data.folderId !== undefined ||
+    parsedBody.data.isArchived !== undefined;
+
+  if (isOrganizationUpdate && access.role !== "OWNER") {
+    return NextResponse.json(
+      { error: "Only the owner can move or archive documents" },
+      { status: 403 },
+    );
+  }
+
   const updateData: Prisma.DocumentUpdateInput = {};
   const nextTitle = normalizeTitle(parsedBody.data.title);
 
@@ -140,6 +164,42 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   if (parsedBody.data.content !== undefined) {
     updateData.content = normalizeContent(parsedBody.data.content);
+  }
+
+  if (parsedBody.data.folderId !== undefined) {
+    if (parsedBody.data.folderId === null) {
+      updateData.folder = {
+        disconnect: true,
+      };
+    } else {
+      const folder = await db.documentFolder.findFirst({
+        where: {
+          id: parsedBody.data.folderId,
+          ownerId: user.id,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!folder) {
+        return NextResponse.json(
+          { error: "Folder not found" },
+          { status: 404 },
+        );
+      }
+
+      updateData.folder = {
+        connect: {
+          id: folder.id,
+        },
+      };
+    }
+  }
+
+  if (parsedBody.data.isArchived !== undefined) {
+    updateData.isArchived = parsedBody.data.isArchived;
+    updateData.archivedAt = parsedBody.data.isArchived ? new Date() : null;
   }
 
   if (Object.keys(updateData).length === 0) {
@@ -155,6 +215,15 @@ export async function PATCH(request: Request, context: RouteContext) {
       id: true,
       title: true,
       content: true,
+      folderId: true,
+      folder: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      isArchived: true,
+      archivedAt: true,
       updatedAt: true,
       createdAt: true,
     },

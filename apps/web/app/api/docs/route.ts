@@ -5,6 +5,7 @@ import { getCurrentUser } from "../../../lib/current-user";
 
 const createDocSchema = z.object({
   title: z.string().trim().max(120).optional(),
+  folderId: z.string().cuid().nullable().optional(),
 });
 
 const readJsonBody = async <T>(request: Request): Promise<T | null> => {
@@ -39,6 +40,15 @@ export async function GET() {
     select: {
       id: true,
       title: true,
+      folderId: true,
+      folder: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      isArchived: true,
+      archivedAt: true,
       updatedAt: true,
       createdAt: true,
     },
@@ -105,10 +115,32 @@ export async function POST(request: Request) {
     );
   }
 
+  const requestedFolderId = parsedBody.data.folderId ?? null;
+  let folderId: string | null = null;
+
+  if (requestedFolderId) {
+    const folder = await db.documentFolder.findFirst({
+      where: {
+        id: requestedFolderId,
+        ownerId: user.id,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!folder) {
+      return NextResponse.json({ error: "Folder not found" }, { status: 404 });
+    }
+
+    folderId = folder.id;
+  }
+
   const document = await db.document.create({
     data: {
       ownerId: user.id,
       title: normalizeTitle(parsedBody.data.title),
+      folderId,
       content: {
         type: "doc",
         content: [{ type: "paragraph" }],
@@ -117,6 +149,7 @@ export async function POST(request: Request) {
     select: {
       id: true,
       title: true,
+      folderId: true,
       updatedAt: true,
       createdAt: true,
     },
