@@ -8,6 +8,7 @@ import {
   toDocContentFromText,
 } from "../../../../lib/document-access";
 import { getCurrentUser } from "../../../../lib/current-user";
+import { docIdParamsSchema } from "../../../../lib/route-params";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -56,7 +57,16 @@ const readJsonBody = async <T>(request: Request): Promise<T | null> => {
 };
 
 export async function GET(_request: Request, context: RouteContext) {
-  const { id } = await context.params;
+  const parsedParams = docIdParamsSchema.safeParse(await context.params);
+
+  if (!parsedParams.success) {
+    return NextResponse.json(
+      { error: "Invalid route params", details: parsedParams.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const { id } = parsedParams.data;
   const user = await getCurrentUser();
 
   if (!user) {
@@ -86,7 +96,16 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const { id } = await context.params;
+  const parsedParams = docIdParamsSchema.safeParse(await context.params);
+
+  if (!parsedParams.success) {
+    return NextResponse.json(
+      { error: "Invalid route params", details: parsedParams.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const { id } = parsedParams.data;
   const user = await getCurrentUser();
 
   if (!user) {

@@ -7,6 +7,7 @@ import {
   getDocumentAccess,
 } from "../../../../../../../lib/document-access";
 import { getCurrentUser } from "../../../../../../../lib/current-user";
+import { docCommentParamsSchema } from "../../../../../../../lib/route-params";
 
 type RouteContext = {
   params: Promise<{ id: string; commentId: string }>;
@@ -42,13 +43,21 @@ export async function POST(
   request: Request,
   context: RouteContext,
 ): Promise<Response> {
+  const parsedParams = docCommentParamsSchema.safeParse(await context.params);
+
+  if (!parsedParams.success) {
+    return NextResponse.json(
+      { error: "Invalid route params", details: parsedParams.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const { id, commentId } = parsedParams.data;
   const user = await getCurrentUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  const { id, commentId } = await context.params;
 
   const access = await getDocumentAccess({ documentId: id, userId: user.id });
 

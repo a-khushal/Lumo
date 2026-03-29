@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db, Prisma } from "@repo/db";
 import { getCurrentUser } from "../../../../../lib/current-user";
+import { docIdParamsSchema } from "../../../../../lib/route-params";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -10,13 +11,21 @@ export async function GET(
   _request: Request,
   context: RouteContext,
 ): Promise<Response> {
+  const parsedParams = docIdParamsSchema.safeParse(await context.params);
+
+  if (!parsedParams.success) {
+    return NextResponse.json(
+      { error: "Invalid route params", details: parsedParams.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const { id } = parsedParams.data;
   const user = await getCurrentUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  const { id } = await context.params;
 
   const document = await db.document.findFirst({
     where: {
@@ -62,13 +71,21 @@ export async function POST(
   _request: Request,
   context: RouteContext,
 ): Promise<Response> {
+  const parsedParams = docIdParamsSchema.safeParse(await context.params);
+
+  if (!parsedParams.success) {
+    return NextResponse.json(
+      { error: "Invalid route params", details: parsedParams.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const { id } = parsedParams.data;
   const user = await getCurrentUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  const { id } = await context.params;
 
   const document = await db.document.findFirst({
     where: {

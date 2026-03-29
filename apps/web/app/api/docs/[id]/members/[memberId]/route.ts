@@ -6,6 +6,7 @@ import {
   getDocumentAccess,
 } from "../../../../../../lib/document-access";
 import { getCurrentUser } from "../../../../../../lib/current-user";
+import { docMemberParamsSchema } from "../../../../../../lib/route-params";
 
 type RouteContext = {
   params: Promise<{ id: string; memberId: string }>;
@@ -47,7 +48,16 @@ export async function PATCH(
   request: Request,
   context: RouteContext,
 ): Promise<Response> {
-  const { id, memberId } = await context.params;
+  const parsedParams = docMemberParamsSchema.safeParse(await context.params);
+
+  if (!parsedParams.success) {
+    return NextResponse.json(
+      { error: "Invalid route params", details: parsedParams.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const { id, memberId } = parsedParams.data;
   const user = await getCurrentUser();
 
   if (!user) {
@@ -125,7 +135,16 @@ export async function DELETE(
   _request: Request,
   context: RouteContext,
 ): Promise<Response> {
-  const { id, memberId } = await context.params;
+  const parsedParams = docMemberParamsSchema.safeParse(await context.params);
+
+  if (!parsedParams.success) {
+    return NextResponse.json(
+      { error: "Invalid route params", details: parsedParams.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const { id, memberId } = parsedParams.data;
   const user = await getCurrentUser();
 
   if (!user) {

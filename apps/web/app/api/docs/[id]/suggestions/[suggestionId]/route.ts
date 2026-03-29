@@ -7,6 +7,7 @@ import {
   getDocumentAccess,
 } from "../../../../../../lib/document-access";
 import { getCurrentUser } from "../../../../../../lib/current-user";
+import { docSuggestionParamsSchema } from "../../../../../../lib/route-params";
 
 type RouteContext = {
   params: Promise<{ id: string; suggestionId: string }>;
@@ -28,13 +29,24 @@ export async function PATCH(
   request: Request,
   context: RouteContext,
 ): Promise<Response> {
+  const parsedParams = docSuggestionParamsSchema.safeParse(
+    await context.params,
+  );
+
+  if (!parsedParams.success) {
+    return NextResponse.json(
+      { error: "Invalid route params", details: parsedParams.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const { id, suggestionId } = parsedParams.data;
   const user = await getCurrentUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id, suggestionId } = await context.params;
   const access = await getDocumentAccess({ documentId: id, userId: user.id });
 
   if (!access) {
