@@ -3,11 +3,12 @@ import { redirect } from "next/navigation";
 import { db, Prisma } from "@repo/db";
 import { signOutUser } from "../lib/auth";
 import { requireCurrentUser } from "../lib/current-user";
+import { QuickOpen } from "../components/quick-open";
 
 export const dynamic = "force-dynamic";
 
 type HomePageProps = {
-  searchParams: Promise<{ scope?: string }>;
+  searchParams: Promise<{ scope?: string; q?: string }>;
 };
 
 type Scope =
@@ -17,12 +18,22 @@ type Scope =
   | { type: "folder"; folderId: string }
   | { type: "trash" };
 
-const toScopeQuery = (scope: string | null | undefined) => {
-  if (!scope || scope === "all") {
-    return "/";
+const toScopeQueryWithSearch = (
+  scope: string | null | undefined,
+  query: string | null,
+) => {
+  const params = new URLSearchParams();
+
+  if (scope && scope !== "all") {
+    params.set("scope", scope);
   }
 
-  return `/?scope=${encodeURIComponent(scope)}`;
+  if (query) {
+    params.set("q", query);
+  }
+
+  const serialized = params.toString();
+  return serialized ? `/?${serialized}` : "/";
 };
 
 const sanitizeScopeValue = (value: unknown) => {
@@ -32,6 +43,20 @@ const sanitizeScopeValue = (value: unknown) => {
 
   const trimmed = value.trim();
   return trimmed || "all";
+};
+
+const sanitizeSearchQuery = (value: unknown) => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim().replace(/\s+/g, " ");
+
+  if (!trimmed) {
+    return null;
+  }
+
+  return trimmed.slice(0, 80);
 };
 
 const resolveScope = (scopeValue: string, folderIds: Set<string>): Scope => {
@@ -165,9 +190,10 @@ const renameFolder = async (formData: FormData) => {
   const folderId = normalizeFolderId(formData.get("folderId"));
   const folderName = normalizeFolderName(formData.get("name"));
   const scope = sanitizeScopeValue(formData.get("scope"));
+  const searchQuery = sanitizeSearchQuery(formData.get("q"));
 
   if (!folderId || !folderName) {
-    redirect(toScopeQuery(scope));
+    redirect(toScopeQueryWithSearch(scope, searchQuery));
   }
 
   const folder = await db.documentFolder.findFirst({
@@ -181,7 +207,7 @@ const renameFolder = async (formData: FormData) => {
   });
 
   if (!folder) {
-    redirect(toScopeQuery(scope));
+    redirect(toScopeQueryWithSearch(scope, searchQuery));
   }
 
   try {
@@ -194,10 +220,10 @@ const renameFolder = async (formData: FormData) => {
       },
     });
   } catch {
-    redirect(toScopeQuery(scope));
+    redirect(toScopeQueryWithSearch(scope, searchQuery));
   }
 
-  redirect(toScopeQuery(scope));
+  redirect(toScopeQueryWithSearch(scope, searchQuery));
 };
 
 const deleteFolder = async (formData: FormData) => {
@@ -206,9 +232,10 @@ const deleteFolder = async (formData: FormData) => {
   const user = await requireCurrentUser();
   const folderId = normalizeFolderId(formData.get("folderId"));
   const scope = sanitizeScopeValue(formData.get("scope"));
+  const searchQuery = sanitizeSearchQuery(formData.get("q"));
 
   if (!folderId) {
-    redirect(toScopeQuery(scope));
+    redirect(toScopeQueryWithSearch(scope, searchQuery));
   }
 
   const folder = await db.documentFolder.findFirst({
@@ -222,7 +249,7 @@ const deleteFolder = async (formData: FormData) => {
   });
 
   if (!folder) {
-    redirect(toScopeQuery(scope));
+    redirect(toScopeQueryWithSearch(scope, searchQuery));
   }
 
   await db.$transaction(async (tx) => {
@@ -244,10 +271,10 @@ const deleteFolder = async (formData: FormData) => {
   });
 
   if (scope === `folder:${folder.id}`) {
-    redirect("/?scope=unfiled");
+    redirect(toScopeQueryWithSearch("unfiled", searchQuery));
   }
 
-  redirect(toScopeQuery(scope));
+  redirect(toScopeQueryWithSearch(scope, searchQuery));
 };
 
 const moveDocument = async (formData: FormData) => {
@@ -257,9 +284,10 @@ const moveDocument = async (formData: FormData) => {
   const documentId = normalizeFolderId(formData.get("documentId"));
   const folderId = normalizeFolderId(formData.get("folderId"));
   const scope = sanitizeScopeValue(formData.get("scope"));
+  const searchQuery = sanitizeSearchQuery(formData.get("q"));
 
   if (!documentId) {
-    redirect(toScopeQuery(scope));
+    redirect(toScopeQueryWithSearch(scope, searchQuery));
   }
 
   const document = await db.document.findFirst({
@@ -274,7 +302,7 @@ const moveDocument = async (formData: FormData) => {
   });
 
   if (!document) {
-    redirect(toScopeQuery(scope));
+    redirect(toScopeQueryWithSearch(scope, searchQuery));
   }
 
   let nextFolderId: string | null = null;
@@ -291,7 +319,7 @@ const moveDocument = async (formData: FormData) => {
     });
 
     if (!folder) {
-      redirect(toScopeQuery(scope));
+      redirect(toScopeQueryWithSearch(scope, searchQuery));
     }
 
     nextFolderId = folder.id;
@@ -306,7 +334,7 @@ const moveDocument = async (formData: FormData) => {
     },
   });
 
-  redirect(toScopeQuery(scope));
+  redirect(toScopeQueryWithSearch(scope, searchQuery));
 };
 
 const archiveDocument = async (formData: FormData) => {
@@ -315,9 +343,10 @@ const archiveDocument = async (formData: FormData) => {
   const user = await requireCurrentUser();
   const documentId = normalizeFolderId(formData.get("documentId"));
   const scope = sanitizeScopeValue(formData.get("scope"));
+  const searchQuery = sanitizeSearchQuery(formData.get("q"));
 
   if (!documentId) {
-    redirect(toScopeQuery(scope));
+    redirect(toScopeQueryWithSearch(scope, searchQuery));
   }
 
   await db.document.updateMany({
@@ -332,7 +361,7 @@ const archiveDocument = async (formData: FormData) => {
     },
   });
 
-  redirect(toScopeQuery(scope));
+  redirect(toScopeQueryWithSearch(scope, searchQuery));
 };
 
 const restoreDocument = async (formData: FormData) => {
@@ -341,9 +370,10 @@ const restoreDocument = async (formData: FormData) => {
   const user = await requireCurrentUser();
   const documentId = normalizeFolderId(formData.get("documentId"));
   const scope = sanitizeScopeValue(formData.get("scope"));
+  const searchQuery = sanitizeSearchQuery(formData.get("q"));
 
   if (!documentId) {
-    redirect(toScopeQuery(scope));
+    redirect(toScopeQueryWithSearch(scope, searchQuery));
   }
 
   await db.document.updateMany({
@@ -358,7 +388,7 @@ const restoreDocument = async (formData: FormData) => {
     },
   });
 
-  redirect(toScopeQuery(scope));
+  redirect(toScopeQueryWithSearch(scope, searchQuery));
 };
 
 const logout = async () => {
@@ -383,11 +413,20 @@ export default async function Home({ searchParams }: HomePageProps) {
 
   const params = await searchParams;
   const scopeValue = sanitizeScopeValue(params.scope);
+  const searchQuery = sanitizeSearchQuery(params.q);
   const folderIds = new Set(folders.map((folder) => folder.id));
   const scope = resolveScope(scopeValue, folderIds);
 
   const documents = await db.document.findMany({
     where: {
+      ...(searchQuery
+        ? {
+            title: {
+              contains: searchQuery,
+              mode: "insensitive" as const,
+            },
+          }
+        : {}),
       ...(scope.type === "shared"
         ? {
             isArchived: false,
@@ -537,6 +576,10 @@ export default async function Home({ searchParams }: HomePageProps) {
       : null;
 
   const defaultFolderIdForCreate = currentFolderId ?? "";
+  const allScopeHref = toScopeQueryWithSearch("all", searchQuery);
+  const sharedScopeHref = toScopeQueryWithSearch("shared", searchQuery);
+  const unfiledScopeHref = toScopeQueryWithSearch("unfiled", searchQuery);
+  const trashScopeHref = toScopeQueryWithSearch("trash", searchQuery);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-5 pb-12 pt-10 sm:px-8">
@@ -577,11 +620,41 @@ export default async function Home({ searchParams }: HomePageProps) {
         </div>
       </header>
 
+      <section className="mb-5 rounded-2xl border border-border bg-panel p-3 shadow-card">
+        <form
+          className="flex flex-col gap-2 sm:flex-row sm:items-center"
+          method="GET"
+        >
+          <input type="hidden" name="scope" value={scopeValue} />
+          <input
+            className="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink outline-none ring-accent/40 focus:ring-2"
+            name="q"
+            defaultValue={searchQuery ?? ""}
+            placeholder="Search documents by title"
+            maxLength={80}
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="submit"
+              className="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-semibold text-ink transition hover:bg-slate-50"
+            >
+              Search
+            </button>
+            <Link
+              href={toScopeQueryWithSearch(scopeValue, null)}
+              className="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-semibold text-ink transition hover:bg-slate-50"
+            >
+              Clear
+            </Link>
+          </div>
+        </form>
+      </section>
+
       <div className="grid gap-5 lg:grid-cols-[250px,1fr]">
         <aside className="space-y-4 rounded-2xl border border-border bg-panel p-4 shadow-card">
           <nav className="space-y-1">
             <Link
-              href="/"
+              href={allScopeHref}
               className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${
                 scope.type === "all"
                   ? "bg-accent text-white"
@@ -593,7 +666,7 @@ export default async function Home({ searchParams }: HomePageProps) {
             </Link>
 
             <Link
-              href="/?scope=shared"
+              href={sharedScopeHref}
               className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${
                 scope.type === "shared"
                   ? "bg-accent text-white"
@@ -605,7 +678,7 @@ export default async function Home({ searchParams }: HomePageProps) {
             </Link>
 
             <Link
-              href="/?scope=unfiled"
+              href={unfiledScopeHref}
               className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${
                 scope.type === "unfiled"
                   ? "bg-accent text-white"
@@ -622,7 +695,10 @@ export default async function Home({ searchParams }: HomePageProps) {
               return (
                 <Link
                   key={folder.id}
-                  href={`/?scope=folder:${folder.id}`}
+                  href={toScopeQueryWithSearch(
+                    `folder:${folder.id}`,
+                    searchQuery,
+                  )}
                   className={`block rounded-lg px-3 py-2 text-sm font-medium transition ${
                     isActive
                       ? "bg-accent text-white"
@@ -635,7 +711,7 @@ export default async function Home({ searchParams }: HomePageProps) {
             })}
 
             <Link
-              href="/?scope=trash"
+              href={trashScopeHref}
               className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${
                 scope.type === "trash"
                   ? "bg-rose-600 text-white"
@@ -682,6 +758,7 @@ export default async function Home({ searchParams }: HomePageProps) {
                     <form action={renameFolder} className="flex gap-2">
                       <input type="hidden" name="folderId" value={folder.id} />
                       <input type="hidden" name="scope" value={scopeValue} />
+                      <input type="hidden" name="q" value={searchQuery ?? ""} />
                       <input
                         className="w-full rounded-md border border-border bg-panel px-2 py-1.5 text-sm text-ink outline-none ring-accent/40 focus:ring-2"
                         name="name"
@@ -703,6 +780,7 @@ export default async function Home({ searchParams }: HomePageProps) {
                     >
                       <input type="hidden" name="folderId" value={folder.id} />
                       <input type="hidden" name="scope" value={scopeValue} />
+                      <input type="hidden" name="q" value={searchQuery ?? ""} />
                       <button
                         className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
                         type="submit"
@@ -740,6 +818,11 @@ export default async function Home({ searchParams }: HomePageProps) {
                   ? "Documents others shared with your account."
                   : "Open, organize, and keep your workspace tidy."}
             </p>
+            {searchQuery ? (
+              <p className="mt-1 text-xs text-muted">
+                Filtered by &quot;{searchQuery}&quot;.
+              </p>
+            ) : null}
           </div>
 
           {documentsWithUnread.length === 0 ? (
@@ -828,6 +911,11 @@ export default async function Home({ searchParams }: HomePageProps) {
                             name="scope"
                             value={scopeValue}
                           />
+                          <input
+                            type="hidden"
+                            name="q"
+                            value={searchQuery ?? ""}
+                          />
                           <select
                             name="folderId"
                             defaultValue={document.folderId ?? ""}
@@ -862,6 +950,11 @@ export default async function Home({ searchParams }: HomePageProps) {
                               name="scope"
                               value={scopeValue}
                             />
+                            <input
+                              type="hidden"
+                              name="q"
+                              value={searchQuery ?? ""}
+                            />
                             <button
                               className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
                               type="submit"
@@ -881,6 +974,11 @@ export default async function Home({ searchParams }: HomePageProps) {
                               name="scope"
                               value={scopeValue}
                             />
+                            <input
+                              type="hidden"
+                              name="q"
+                              value={searchQuery ?? ""}
+                            />
                             <button
                               className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-accent-strong transition hover:bg-emerald-100"
                               type="submit"
@@ -898,6 +996,8 @@ export default async function Home({ searchParams }: HomePageProps) {
           )}
         </section>
       </div>
+
+      <QuickOpen />
     </main>
   );
 }

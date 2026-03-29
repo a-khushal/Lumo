@@ -12,6 +12,7 @@ import {
   syncCommentAnchors,
   type CommentAnchor,
 } from "./comment-anchor-extension";
+import { QuickOpen } from "../../../components/quick-open";
 
 type DocumentEditorProps = {
   documentId: string;
@@ -2198,6 +2199,8 @@ export function DocumentEditor({
           </div>
         )}
       </section>
+
+      <QuickOpen currentDocumentId={documentId} />
     </main>
   );
 }
