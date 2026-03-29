@@ -12,6 +12,7 @@ type HomePageProps = {
 
 type Scope =
   | { type: "all" }
+  | { type: "shared" }
   | { type: "unfiled" }
   | { type: "folder"; folderId: string }
   | { type: "trash" };
@@ -34,6 +35,10 @@ const sanitizeScopeValue = (value: unknown) => {
 };
 
 const resolveScope = (scopeValue: string, folderIds: Set<string>): Scope => {
+  if (scopeValue === "shared") {
+    return { type: "shared" };
+  }
+
   if (scopeValue === "trash") {
     return { type: "trash" };
   }
@@ -383,13 +388,29 @@ export default async function Home({ searchParams }: HomePageProps) {
 
   const documents = await db.document.findMany({
     where: {
-      ownerId: user.id,
-      ...(scope.type === "trash"
-        ? { isArchived: true }
-        : {
+      ...(scope.type === "shared"
+        ? {
             isArchived: false,
-            ...(scope.type === "unfiled" ? { folderId: null } : {}),
-            ...(scope.type === "folder" ? { folderId: scope.folderId } : {}),
+            ownerId: {
+              not: user.id,
+            },
+            members: {
+              some: {
+                userId: user.id,
+              },
+            },
+          }
+        : {
+            ownerId: user.id,
+            ...(scope.type === "trash"
+              ? { isArchived: true }
+              : {
+                  isArchived: false,
+                  ...(scope.type === "unfiled" ? { folderId: null } : {}),
+                  ...(scope.type === "folder"
+                    ? { folderId: scope.folderId }
+                    : {}),
+                }),
           }),
     },
     select: {
@@ -404,6 +425,22 @@ export default async function Home({ searchParams }: HomePageProps) {
           id: true,
           name: true,
         },
+      },
+      owner: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+        },
+      },
+      members: {
+        where: {
+          userId: user.id,
+        },
+        select: {
+          role: true,
+        },
+        take: 1,
       },
     },
     orderBy:
@@ -431,6 +468,20 @@ export default async function Home({ searchParams }: HomePageProps) {
     where: {
       ownerId: user.id,
       isArchived: true,
+    },
+  });
+
+  const sharedCount = await db.document.count({
+    where: {
+      isArchived: false,
+      ownerId: {
+        not: user.id,
+      },
+      members: {
+        some: {
+          userId: user.id,
+        },
+      },
     },
   });
 
@@ -539,6 +590,18 @@ export default async function Home({ searchParams }: HomePageProps) {
             >
               <span>All documents</span>
               <span className="text-xs">{activeCount}</span>
+            </Link>
+
+            <Link
+              href="/?scope=shared"
+              className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${
+                scope.type === "shared"
+                  ? "bg-accent text-white"
+                  : "text-ink hover:bg-slate-50"
+              }`}
+            >
+              <span>Shared with me</span>
+              <span className="text-xs">{sharedCount}</span>
             </Link>
 
             <Link
@@ -662,16 +725,20 @@ export default async function Home({ searchParams }: HomePageProps) {
             <h2 className="text-base font-semibold text-ink">
               {scope.type === "trash"
                 ? "Trash"
-                : scope.type === "unfiled"
-                  ? "Unfiled documents"
-                  : scope.type === "folder"
-                    ? `Folder: ${currentFolder?.name ?? "Documents"}`
-                    : "All documents"}
+                : scope.type === "shared"
+                  ? "Shared with me"
+                  : scope.type === "unfiled"
+                    ? "Unfiled documents"
+                    : scope.type === "folder"
+                      ? `Folder: ${currentFolder?.name ?? "Documents"}`
+                      : "All documents"}
             </h2>
             <p className="text-sm text-muted">
               {scope.type === "trash"
                 ? "Restore docs when you need them again."
-                : "Open, organize, and keep your workspace tidy."}
+                : scope.type === "shared"
+                  ? "Documents others shared with your account."
+                  : "Open, organize, and keep your workspace tidy."}
             </p>
           </div>
 
@@ -679,7 +746,9 @@ export default async function Home({ searchParams }: HomePageProps) {
             <p className="p-4 text-sm text-muted">
               {scope.type === "trash"
                 ? "Trash is empty."
-                : "No docs in this view yet."}
+                : scope.type === "shared"
+                  ? "No one has shared a document with you yet."
+                  : "No docs in this view yet."}
             </p>
           ) : (
             <ul>
@@ -704,7 +773,18 @@ export default async function Home({ searchParams }: HomePageProps) {
                       )}
 
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
-                        {document.folder ? (
+                        {scope.type === "shared" ? (
+                          <>
+                            <span className="rounded-full border border-border bg-slate-50 px-2 py-0.5">
+                              Shared by{" "}
+                              {document.owner.name?.trim() ||
+                                document.owner.email}
+                            </span>
+                            <span className="rounded-full border border-border bg-slate-50 px-2 py-0.5">
+                              Your role {document.members[0]?.role ?? "VIEWER"}
+                            </span>
+                          </>
+                        ) : document.folder ? (
                           <span className="rounded-full border border-border bg-slate-50 px-2 py-0.5">
                             {document.folder.name}
                           </span>
@@ -733,7 +813,7 @@ export default async function Home({ searchParams }: HomePageProps) {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                      {!document.isArchived ? (
+                      {!document.isArchived && scope.type !== "shared" ? (
                         <form
                           action={moveDocument}
                           className="flex items-center gap-2"
@@ -769,45 +849,47 @@ export default async function Home({ searchParams }: HomePageProps) {
                         </form>
                       ) : null}
 
-                      {!document.isArchived ? (
-                        <form action={archiveDocument}>
-                          <input
-                            type="hidden"
-                            name="documentId"
-                            value={document.id}
-                          />
-                          <input
-                            type="hidden"
-                            name="scope"
-                            value={scopeValue}
-                          />
-                          <button
-                            className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
-                            type="submit"
-                          >
-                            Archive
-                          </button>
-                        </form>
-                      ) : (
-                        <form action={restoreDocument}>
-                          <input
-                            type="hidden"
-                            name="documentId"
-                            value={document.id}
-                          />
-                          <input
-                            type="hidden"
-                            name="scope"
-                            value={scopeValue}
-                          />
-                          <button
-                            className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-accent-strong transition hover:bg-emerald-100"
-                            type="submit"
-                          >
-                            Restore
-                          </button>
-                        </form>
-                      )}
+                      {scope.type !== "shared" ? (
+                        !document.isArchived ? (
+                          <form action={archiveDocument}>
+                            <input
+                              type="hidden"
+                              name="documentId"
+                              value={document.id}
+                            />
+                            <input
+                              type="hidden"
+                              name="scope"
+                              value={scopeValue}
+                            />
+                            <button
+                              className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
+                              type="submit"
+                            >
+                              Archive
+                            </button>
+                          </form>
+                        ) : (
+                          <form action={restoreDocument}>
+                            <input
+                              type="hidden"
+                              name="documentId"
+                              value={document.id}
+                            />
+                            <input
+                              type="hidden"
+                              name="scope"
+                              value={scopeValue}
+                            />
+                            <button
+                              className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-accent-strong transition hover:bg-emerald-100"
+                              type="submit"
+                            >
+                              Restore
+                            </button>
+                          </form>
+                        )
+                      ) : null}
                     </div>
                   </div>
                 </li>
